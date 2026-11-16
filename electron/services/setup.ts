@@ -15,6 +15,7 @@ import { OllamaClient, findOllamaBinary, startOllamaServer } from './ollama'
  */
 
 const OLLAMA_WINDOWS_URL = 'https://ollama.com/download/OllamaSetup.exe'
+const OLLAMA_MAC_URL = 'https://ollama.com/download/Ollama-darwin.zip'
 const STALL_MS = 60_000
 
 function run(cmd: string, args: string[], timeout = 15000): Promise<{ ok: boolean; out: string }> {
@@ -77,14 +78,9 @@ export class SetupManager {
   /** Install Ollama. Windows: winget, falling back to the signed official installer. Other OSes: guided. */
   async installOllama(): Promise<{ ok: boolean; message: string }> {
     if (findOllamaBinary()) return this.ensureRunning()
+    if (process.platform === 'darwin') return this.installOllamaMac()
     if (process.platform !== 'win32') {
-      return {
-        ok: false,
-        message:
-          process.platform === 'darwin'
-            ? 'Download Ollama for macOS from https://ollama.com/download, open it once, then click "Check again".'
-            : 'Run this in a terminal, then click "Check again":  curl -fsSL https://ollama.com/install.sh | sh'
-      }
+      return { ok: false, message: 'Run this in a terminal, then click "Check again":  curl -fsSL https://ollama.com/install.sh | sh' }
     }
     this.abort = new AbortController()
     const step = 'ollama'
@@ -129,6 +125,53 @@ export class SetupManager {
     await fsp.rm(file, { force: true }).catch(() => undefined)
     if (code !== 0 && !findOllamaBinary()) return { ok: false, message: `The Ollama installer exited with code ${code}. Install it from https://ollama.com/download.` }
     return this.ensureRunning()
+  }
+
+  /**
+   * macOS: download the official Ollama.app, verify Apple's code signature (Developer ID,
+   * Ollama team), install it to /Applications (or ~/Applications without admin rights) and start it.
+   */
+  private async installOllamaMac(): Promise<{ ok: boolean; message: string }> {
+    const step = 'ollama'
+    const manual = 'Install Ollama from https://ollama.com/download (open the .dmg and drag Ollama to Applications), start it once, then click "Check again".'
+    this.abort = new AbortController()
+    const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'ollama-mac-'))
+    try {
+      const zip = path.join(work, 'Ollama-darwin.zip')
+      try {
+        await this.download(OLLAMA_MAC_URL, zip, step, 'Downloading Ollama for macOS')
+      } catch (e) {
+        return { ok: false, message: `Could not download Ollama: ${(e as Error).message}. ${manual}` }
+      }
+      this.emit({ step, status: 'Unpacking…' })
+      const unzip = await run('/usr/bin/ditto', ['-x', '-k', zip, work], 120000)
+      const appPath = path.join(work, 'Ollama.app')
+      if (!unzip.ok || !fs.existsSync(appPath)) return { ok: false, message: `Could not unpack Ollama. ${manual}` }
+
+      this.emit({ step, status: 'Verifying Apple code signature…' })
+      const verify = await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath], 120000)
+      const info = await run('/usr/bin/codesign', ['-dv', '--verbose=2', appPath], 30000)
+      if (!verify.ok || !/Authority=Developer ID Application:.*Ollama/i.test(info.out)) {
+        return { ok: false, message: `The downloaded Ollama app is not signed by Ollama, so it was not installed. ${manual}` }
+      }
+
+      this.emit({ step, status: 'Installing to Applications…' })
+      let target = '/Applications/Ollama.app'
+      let moved = await run('/usr/bin/ditto', [appPath, target], 120000)
+      if (!moved.ok) {
+        // No write access to /Applications (standard user): use ~/Applications.
+        const userApps = path.join(os.homedir(), 'Applications')
+        await fsp.mkdir(userApps, { recursive: true })
+        target = path.join(userApps, 'Ollama.app')
+        moved = await run('/usr/bin/ditto', [appPath, target], 120000)
+        if (!moved.ok) return { ok: false, message: `Could not copy Ollama into Applications. ${manual}` }
+      }
+      this.emit({ step, status: 'Starting Ollama…' })
+      await run('/usr/bin/open', ['-a', target])
+      return this.ensureRunning()
+    } finally {
+      await fsp.rm(work, { recursive: true, force: true }).catch(() => undefined)
+    }
   }
 
   private async ensureRunning(): Promise<{ ok: boolean; message: string }> {

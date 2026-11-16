@@ -164,7 +164,7 @@ export function SetupWizard() {
               <>
                 <div className="mb-2 text-ui-sm text-muted">{status.ollamaPath ? 'Ollama is installed but not running.' : 'Ollama is not installed yet (about 1 GB download).'}</div>
                 <div className="flex flex-wrap gap-2">
-                  {status.platform === 'win32' || status.ollamaPath ? (
+                  {status.platform === 'win32' || status.platform === 'darwin' || status.ollamaPath ? (
                     <Button icon={Download} busy={busy === 'ollama'} disabled={!!busy && busy !== 'ollama'} onClick={() => void installOllama()}>
                       {status.ollamaPath ? 'Start Ollama' : 'Install Ollama'}
                     </Button>

@@ -33,6 +33,13 @@ nsis:
 mac:
   icon: resources/icon.png
   category: public.app-category.developer-tools
+  # No Apple Developer certificate: ad-hoc sign so Apple Silicon Macs can run the app
+  # (unsigned apps are reported as "damaged"). Hardened runtime is off, as required for ad-hoc.
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  darkModeSupport: true
+  minimumSystemVersion: "12.0"
   target:
     - target: dmg
       arch: [x64, arm64]

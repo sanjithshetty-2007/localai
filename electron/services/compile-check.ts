@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseActions } from './action-parser'
+import { isMacPlaceholder } from '../platform/mac-tools'
 
 /*
  * Compile-only verification of code the model wrote. Files are written to a private temp
@@ -45,6 +46,8 @@ export function collectCodeFiles(text: string): CodeFile[] {
 }
 
 function run(cmd: string, args: string[], cwd: string): Promise<{ ok: boolean; out: string; missing: boolean }> {
+  // macOS: a placeholder compiler would open an install dialog; treat it as not installed.
+  if (isMacPlaceholder(cmd)) return Promise.resolve({ ok: false, out: '', missing: true })
   return new Promise((resolve) => {
     try {
       execFile(cmd, args, { cwd, timeout: 30000, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {

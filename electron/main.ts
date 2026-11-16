@@ -2,11 +2,15 @@ import { app, BrowserWindow, shell, session } from 'electron'
 import path from 'node:path'
 import { registerIpc, shutdownServices, TITLEBAR_COLORS } from './ipc/register'
 import { getSettings } from './services/db'
+import { fixUnixPath, installMacMenu } from './platform/mac'
 
 const isDev = !app.isPackaged && !!process.env['ELECTRON_RENDERER_URL']
 
 // Lets automated tests run against an isolated profile (database, settings).
 if (process.env.LOCALCODE_USER_DATA) app.setPath('userData', process.env.LOCALCODE_USER_DATA)
+
+// macOS/Linux: give Finder-launched apps the user's real PATH (no-op on Windows).
+fixUnixPath()
 
 let mainWindow: BrowserWindow | null = null
 
@@ -69,6 +73,7 @@ if (!gotLock) {
     // Deny every permission request (camera, geolocation, notifications...) — none are needed.
     session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'clipboard-sanitized-write'))
     registerIpc(getMainWindow)
+    installMacMenu(getMainWindow) // macOS only
     createWindow()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -74,7 +74,10 @@ export async function detectHardware(): Promise<HardwareInfo> {
   const appleUnified = gpus.some((g) => /unified/.test(g.source))
 
   let recommended: HardwareProfile = 'lite'
-  if (appleUnified) recommended = totalRamGB >= 32 ? 'deep' : totalRamGB >= 16 ? 'balanced' : 'lite'
+  // Apple Silicon: the GPU may use roughly 2/3 of unified memory, so the 14B code model
+  // (~11 GB with an 8K context) needs a 24 GB Mac. Intel Macs run Ollama on the CPU.
+  if (appleUnified) recommended = totalRamGB >= 48 ? 'deep' : totalRamGB >= 24 ? 'balanced' : 'lite'
+  else if (process.platform === 'darwin') recommended = 'lite'
   else if (bestVram >= 12 && totalRamGB >= 32) recommended = 'deep'
   else if (bestVram >= 7) recommended = 'balanced'
   else if (bestVram === 0 && totalRamGB >= 32) recommended = 'balanced'

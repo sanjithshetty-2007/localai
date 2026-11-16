@@ -5,11 +5,14 @@ import os from 'node:os'
 import type { RunEvent, RunProblem, RunResult, RuntimeInfo } from '../../shared/types'
 import { newId } from '../util/id'
 import { parseCommand, WINDOWS_CMD_SHIMS } from '../security/commands'
+import { isMacPlaceholder } from '../platform/mac-tools'
 
 const isWin = process.platform === 'win32'
 const MAX_CAPTURE = 200_000
 
 function probe(cmd: string, args: string[]): Promise<string | null> {
+  // macOS: never execute install-prompt placeholders (/usr/bin/python3 etc. without Command Line Tools).
+  if (isMacPlaceholder(cmd)) return Promise.resolve(null)
   return new Promise((resolve) => {
     // Batch shims (.cmd) cannot be spawned directly on Windows; go through cmd.exe.
     const viaCmd = isWin && /\.(cmd|bat)$/i.test(cmd)

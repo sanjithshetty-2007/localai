@@ -266,7 +266,12 @@ export function findOllamaBinary(): string | null {
     candidates.push(path.join(local, 'Programs', 'Ollama', 'ollama.exe'))
     candidates.push('C:\\Program Files\\Ollama\\ollama.exe')
   } else if (process.platform === 'darwin') {
-    candidates.push('/Applications/Ollama.app/Contents/Resources/ollama', '/usr/local/bin/ollama', '/opt/homebrew/bin/ollama')
+    candidates.push(
+      '/Applications/Ollama.app/Contents/Resources/ollama',
+      path.join(os.homedir(), 'Applications', 'Ollama.app', 'Contents', 'Resources', 'ollama'),
+      '/usr/local/bin/ollama',
+      '/opt/homebrew/bin/ollama'
+    )
   } else {
     candidates.push('/usr/local/bin/ollama', '/usr/bin/ollama', path.join(os.homedir(), '.local', 'bin', 'ollama'))
   }

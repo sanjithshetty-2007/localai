@@ -35,13 +35,63 @@ jobs:
       # Native modules (better-sqlite3, node-pty) ship prebuilt N-API binaries; no compile step needed.
       - run: npm ci --ignore-scripts
 
+      # macOS runners are Apple Silicon: also fetch the Intel terminal binaries for the x64 build.
+      - name: Add Intel macOS terminal binaries
+        if: runner.os == 'macOS'
+        run: npm install --no-save --ignore-scripts --force "@lydell/node-pty-darwin-x64@$(node -p "require('./node_modules/@lydell/node-pty/package.json').version")"
+
       - run: npm run typecheck
       - run: npm test
       - run: npx electron-vite build
 
       - run: npx electron-builder ${{ matrix.args }} --publish never
+        if: runner.os != 'macOS'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false # installers are not code-signed
+
+      # macOS: ad-hoc signed (see electron-builder.yml), so no certificate lookup settings.
+      - name: Build macOS apps
+        if: runner.os == 'macOS'
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - name: Verify macOS signatures and native modules
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          check() {
+            APP="$1"; RUN="$2"
+            echo "== $APP"
+            codesign --verify --deep --strict --verbose=2 "$APP"
+            codesign -dv "$APP" 2>&1 | grep -E "^(Identifier|Format|Signature)"
+            BIN="$APP/Contents/MacOS/LocalCode AI Studio"
+            M="$APP/Contents/Resources/app.asar.unpacked/node_modules"
+            ELECTRON_RUN_AS_NODE=1 $RUN "$BIN" -e "
+              const D = require('$M/better-sqlite3'); const db = new D(':memory:');
+              db.exec('create virtual table t using fts5(x)'); console.log('sqlite ok', process.arch);
+              const pty = require('$M/@lydell/node-pty');
+              const t = pty.spawn('/bin/echo', ['pty ok'], {});
+              let out = ''; t.onData(d => out += d);
+              t.onExit(() => { if (!out.includes('pty ok')) { console.error('no pty output'); process.exit(1) } console.log(out.trim()); process.exit(0) });
+              setTimeout(() => { console.error('pty timeout'); process.exit(1) }, 10000);"
+          }
+          check "$(ls -d release/*/mac-arm64/*.app)" ""
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            check "$(ls -d release/*/mac/*.app)" "arch -x86_64"
+          else
+            echo "Rosetta not available on this runner: checking the x64 app's signature and binaries only"
+            APP="$(ls -d release/*/mac/*.app)"
+            codesign --verify --deep --strict --verbose=2 "$APP"
+            file "$APP/Contents/Resources/app.asar.unpacked/node_modules/@lydell/node-pty-darwin-x64/prebuilds/darwin-x64/pty.node" | grep x86_64
+          fi
+
+      - name: Run the packaged macOS app (UI, database, terminal, code runner)
+        if: runner.os == 'macOS'
+        run: |
+          APP="$(ls -d release/*/mac-arm64/*.app)"
+          export E2E_EXE="$PWD/$APP/Contents/MacOS/LocalCode AI Studio"
+          export E2E_OUT="$RUNNER_TEMP/e2e" E2E_USER_DATA="$RUNNER_TEMP/profile"
+          node scripts/e2e.mjs ci 2>&1 | tee "$RUNNER_TEMP/ci.log"
+          grep -q "CI CHECK PASSED" "$RUNNER_TEMP/ci.log"
 
       - uses: actions/upload-artifact@v4
         with:

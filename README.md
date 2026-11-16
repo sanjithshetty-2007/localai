@@ -28,7 +28,26 @@ Optional:
 - **Running code**: install the language you need. Python from python.org; C/C++ via MSYS2 (`g++`); Java via a JDK. **Settings → Runtimes** shows what's missing.
 - To run the setup again later: **Settings → Ollama → Run setup wizard**.
 
-macOS and Linux builds (`.dmg`, `.AppImage`) are produced by the same release workflow but haven't been tested. On those systems, install Ollama from [ollama.com/download](https://ollama.com/download) first; the wizard then downloads the models.
+## Install (macOS)
+
+Requires macOS 12 or newer. Apple Silicon (M1–M4) is strongly recommended. Intel Macs run the models on the CPU, which is slow.
+
+1. From **[Releases → latest](https://github.com/sanjithshetty-2007/localai/releases/latest)**, download **`LocalCode-AI-Studio-<version>-mac-arm64.dmg`** for Apple Silicon or **`…-mac-x64.dmg`** for Intel Macs. To check which Mac you have:  → About This Mac → *Chip*.
+2. Open the `.dmg` and drag **LocalCode AI Studio** into **Applications**.
+3. **First launch:** the app isn't notarized by Apple (that needs a paid Apple Developer account), so macOS asks for confirmation once:
+   - macOS 15 Sequoia and newer: open the app. When it's blocked, go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**, then confirm.
+   - macOS 12–14: **right-click** the app in Applications → **Open** → **Open**.
+   - If macOS says the app *"is damaged and can't be opened"*, run this once in Terminal, then open it again:
+     ```bash
+     xattr -dr com.apple.quarantine "/Applications/LocalCode AI Studio.app"
+     ```
+4. The **setup wizard** installs Ollama: it downloads Apple's signed `Ollama.app` from ollama.com, checks the signature, and puts it in Applications. Then it downloads the models. It recommends a profile from your unified memory: **Lite** for 8–16 GB, **Balanced** for 24 GB+, **Deep** for 48 GB+.
+
+Running code on a Mac: C/C++ need Apple's Command Line Tools (`xcode-select --install`). Python, Node.js and Java can come from Homebrew or their installers. The app also finds tools installed with Homebrew.
+
+Every release build is checked automatically on a real Mac before it's published. The check covers the signature, the database and terminal native modules for Apple Silicon and Intel, and a launch of the packaged app that tests the window, database, terminal and code runner.
+
+Linux (`.AppImage`) is built too but hasn't been tested. Install Ollama with `curl -fsSL https://ollama.com/install.sh | sh` first; the wizard then downloads the models.
 
 ---
 
