@@ -28,8 +28,9 @@ check_app() {
     setTimeout(() => { console.error('pty timeout'); process.exit(1) }, 10000);" 2>&1) && note "$LABEL native modules" "$OUT" || fail "$LABEL native modules" "$OUT"
 }
 
-ARM_APP="$(ls -d release/*/mac-arm64/*.app 2>/dev/null | head -1)"
-X64_APP="$(ls -d release/*/mac/*.app 2>/dev/null | head -1)"
+# Absolute paths: require() treats a relative path without ./ as a package name.
+ARM_APP="$PWD/$(ls -d release/*/mac-arm64/*.app 2>/dev/null | head -1)"
+X64_APP="$PWD/$(ls -d release/*/mac/*.app 2>/dev/null | head -1)"
 check_app "$ARM_APP" "" "arm64"
 if arch -x86_64 /usr/bin/true 2>/dev/null; then
   check_app "$X64_APP" "arch -x86_64" "x64"
