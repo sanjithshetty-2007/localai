@@ -1,0 +1,370 @@
+@import 'tailwindcss';
+
+/*
+ * The single place for shared values. Every component styles itself through these
+ * tokens (as Tailwind colours below), so Dark+ and Light+ stay consistent everywhere.
+ */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --vs-titlebar: #3c3c3c;
+  --vs-titlebar-fg: #cccccc;
+  --vs-activity: #333333;
+  --vs-activity-fg: #858585;
+  --vs-activity-active: #ffffff;
+  --vs-sidebar: #252526;
+  --vs-editor: #1e1e1e;
+  --vs-panel: #1e1e1e;
+  --vs-tab: #2d2d2d;
+  --vs-tab-active: #1e1e1e;
+  --vs-tabbar: #252526;
+  --vs-input: #3c3c3c;
+  --vs-input-border: #3c3c3c;
+  --vs-hover: #2a2d2e;
+  --vs-selected: #37373d;
+  --vs-selected-focus: #04395e;
+  --vs-fg: #cccccc;
+  --vs-fg-strong: #e7e7e7;
+  --vs-fg-muted: #8b8b8b;
+  --vs-border: #2b2b2b;
+  --vs-border-strong: #454545;
+  --vs-accent: #0078d4;
+  --vs-focus: #007fd4;
+  --vs-button: #0e639c;
+  --vs-button-hover: #1177bb;
+  --vs-button-fg: #ffffff;
+  --vs-button2: #3a3d41;
+  --vs-button2-hover: #45494e;
+  --vs-statusbar: #007acc;
+  --vs-statusbar-fg: #ffffff;
+  --vs-error: #f48771;
+  --vs-warning: #cca700;
+  --vs-success: #89d185;
+  --vs-info: #3794ff;
+  --vs-ins-bg: rgba(155, 185, 85, 0.2);
+  --vs-del-bg: rgba(255, 0, 0, 0.2);
+  --vs-ins-fg: #89d185;
+  --vs-del-fg: #f48771;
+  --vs-badge: #4d4d4d;
+  --vs-code-bg: #181818;
+  --vs-user-msg: #2b2d31;
+  --vs-shadow: rgba(0, 0, 0, 0.36);
+  --vs-scroll: rgba(121, 121, 121, 0.4);
+  --vs-scroll-hover: rgba(100, 100, 100, 0.7);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --vs-titlebar: #dddddd;
+  --vs-titlebar-fg: #333333;
+  --vs-activity: #f8f8f8;
+  --vs-activity-fg: #616161;
+  --vs-activity-active: #1f1f1f;
+  --vs-sidebar: #f3f3f3;
+  --vs-editor: #ffffff;
+  --vs-panel: #ffffff;
+  --vs-tab: #ececec;
+  --vs-tab-active: #ffffff;
+  --vs-tabbar: #f3f3f3;
+  --vs-input: #ffffff;
+  --vs-input-border: #cecece;
+  --vs-hover: #e8e8e8;
+  --vs-selected: #e4e6f1;
+  --vs-selected-focus: #cce4f7;
+  --vs-fg: #3b3b3b;
+  --vs-fg-strong: #1f1f1f;
+  --vs-fg-muted: #717171;
+  --vs-border: #e5e5e5;
+  --vs-border-strong: #cecece;
+  --vs-accent: #005fb8;
+  --vs-focus: #0090f1;
+  --vs-button: #005fb8;
+  --vs-button-hover: #0258a8;
+  --vs-button-fg: #ffffff;
+  --vs-button2: #e5e5e5;
+  --vs-button2-hover: #cccccc;
+  --vs-statusbar: #007acc;
+  --vs-statusbar-fg: #ffffff;
+  --vs-error: #e51400;
+  --vs-warning: #bf8803;
+  --vs-success: #388a34;
+  --vs-info: #1a85ff;
+  --vs-ins-bg: rgba(155, 185, 85, 0.25);
+  --vs-del-bg: rgba(255, 0, 0, 0.15);
+  --vs-ins-fg: #388a34;
+  --vs-del-fg: #e51400;
+  --vs-badge: #c4c4c4;
+  --vs-code-bg: #f6f6f6;
+  --vs-user-msg: #eef1f6;
+  --vs-shadow: rgba(0, 0, 0, 0.16);
+  --vs-scroll: rgba(100, 100, 100, 0.4);
+  --vs-scroll-hover: rgba(100, 100, 100, 0.7);
+}
+
+@theme inline {
+  --color-titlebar: var(--vs-titlebar);
+  --color-titlebar-fg: var(--vs-titlebar-fg);
+  --color-activity: var(--vs-activity);
+  --color-activity-fg: var(--vs-activity-fg);
+  --color-activity-active: var(--vs-activity-active);
+  --color-sidebar: var(--vs-sidebar);
+  --color-editor: var(--vs-editor);
+  --color-panel: var(--vs-panel);
+  --color-tab: var(--vs-tab);
+  --color-tab-active: var(--vs-tab-active);
+  --color-tabbar: var(--vs-tabbar);
+  --color-input: var(--vs-input);
+  --color-input-border: var(--vs-input-border);
+  --color-hover: var(--vs-hover);
+  --color-selected: var(--vs-selected);
+  --color-selected-focus: var(--vs-selected-focus);
+  --color-fg: var(--vs-fg);
+  --color-fg-strong: var(--vs-fg-strong);
+  --color-muted: var(--vs-fg-muted);
+  --color-line: var(--vs-border);
+  --color-line-strong: var(--vs-border-strong);
+  --color-accent: var(--vs-accent);
+  --color-focus: var(--vs-focus);
+  --color-button: var(--vs-button);
+  --color-button-hover: var(--vs-button-hover);
+  --color-button-fg: var(--vs-button-fg);
+  --color-button2: var(--vs-button2);
+  --color-button2-hover: var(--vs-button2-hover);
+  --color-statusbar: var(--vs-statusbar);
+  --color-statusbar-fg: var(--vs-statusbar-fg);
+  --color-error: var(--vs-error);
+  --color-warning: var(--vs-warning);
+  --color-success: var(--vs-success);
+  --color-info: var(--vs-info);
+  --color-ins: var(--vs-ins-fg);
+  --color-del: var(--vs-del-fg);
+  --color-ins-bg: var(--vs-ins-bg);
+  --color-del-bg: var(--vs-del-bg);
+  --color-badge: var(--vs-badge);
+  --color-code: var(--vs-code-bg);
+  --color-usermsg: var(--vs-user-msg);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, Ubuntu, 'Droid Sans', sans-serif;
+  --font-mono: Consolas, 'Cascadia Code', 'SF Mono', Menlo, 'Ubuntu Mono', 'Courier New', monospace;
+  --text-ui: 13px;
+  --text-ui-sm: 12px;
+  --text-ui-xs: 11px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--vs-editor);
+  color: var(--vs-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.selectable,
+.selectable * {
+  user-select: text;
+}
+
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+*:focus-visible {
+  outline: 1px solid var(--vs-focus);
+  outline-offset: -1px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--vs-scroll);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vs-scroll-hover);
+}
+::-webkit-scrollbar-corner,
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Chat markdown */
+.md {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.md p {
+  margin: 0 0 0.6em;
+}
+.md ul,
+.md ol {
+  margin: 0 0 0.6em;
+  padding-left: 1.4em;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin: 0.15em 0;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  color: var(--vs-fg-strong);
+  font-weight: 600;
+  margin: 0.8em 0 0.4em;
+}
+.md h1 {
+  font-size: 1.25em;
+}
+.md h2 {
+  font-size: 1.15em;
+}
+.md h3,
+.md h4 {
+  font-size: 1.05em;
+}
+.md a {
+  color: var(--vs-info);
+}
+.md blockquote {
+  border-left: 3px solid var(--vs-border-strong);
+  margin: 0 0 0.6em;
+  padding: 0.1em 0 0.1em 0.8em;
+  color: var(--vs-fg-muted);
+}
+.md :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--vs-code-bg);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+.md table {
+  border-collapse: collapse;
+  margin: 0 0 0.6em;
+  font-size: 0.95em;
+}
+.md th,
+.md td {
+  border: 1px solid var(--vs-border-strong);
+  padding: 3px 8px;
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--vs-border-strong);
+  margin: 0.8em 0;
+}
+.md pre {
+  margin: 0;
+}
+
+/* highlight.js tokens mapped to Dark+/Light+ */
+.hljs {
+  color: var(--vs-fg);
+}
+:root[data-theme='dark'] .hljs-keyword,
+:root[data-theme='dark'] .hljs-literal,
+:root[data-theme='dark'] .hljs-built_in {
+  color: #569cd6;
+}
+:root[data-theme='dark'] .hljs-string,
+:root[data-theme='dark'] .hljs-attr-value {
+  color: #ce9178;
+}
+:root[data-theme='dark'] .hljs-number {
+  color: #b5cea8;
+}
+:root[data-theme='dark'] .hljs-comment {
+  color: #6a9955;
+}
+:root[data-theme='dark'] .hljs-title,
+:root[data-theme='dark'] .hljs-title.function_ {
+  color: #dcdcaa;
+}
+:root[data-theme='dark'] .hljs-title.class_,
+:root[data-theme='dark'] .hljs-type {
+  color: #4ec9b0;
+}
+:root[data-theme='dark'] .hljs-attr,
+:root[data-theme='dark'] .hljs-variable,
+:root[data-theme='dark'] .hljs-params {
+  color: #9cdcfe;
+}
+:root[data-theme='dark'] .hljs-meta,
+:root[data-theme='dark'] .hljs-tag {
+  color: #808080;
+}
+:root[data-theme='dark'] .hljs-name {
+  color: #569cd6;
+}
+:root[data-theme='light'] .hljs-keyword,
+:root[data-theme='light'] .hljs-literal,
+:root[data-theme='light'] .hljs-built_in {
+  color: #0000ff;
+}
+:root[data-theme='light'] .hljs-string {
+  color: #a31515;
+}
+:root[data-theme='light'] .hljs-number {
+  color: #098658;
+}
+:root[data-theme='light'] .hljs-comment {
+  color: #008000;
+}
+:root[data-theme='light'] .hljs-title,
+:root[data-theme='light'] .hljs-title.function_ {
+  color: #795e26;
+}
+:root[data-theme='light'] .hljs-title.class_,
+:root[data-theme='light'] .hljs-type {
+  color: #267f99;
+}
+:root[data-theme='light'] .hljs-attr,
+:root[data-theme='light'] .hljs-variable,
+:root[data-theme='light'] .hljs-params {
+  color: #001080;
+}
+:root[data-theme='light'] .hljs-meta,
+:root[data-theme='light'] .hljs-tag {
+  color: #800000;
+}
+
+.xterm {
+  padding: 4px 0 0 8px;
+  height: 100%;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.caret::after {
+  content: '▍';
+  animation: blink 1s step-start infinite;
+  color: var(--vs-fg-muted);
+}

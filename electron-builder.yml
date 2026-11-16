@@ -1,0 +1,49 @@
+appId: com.localcode.aistudio
+productName: LocalCode AI Studio
+copyright: Copyright © 2026 LocalCode AI Studio
+directories:
+  output: release/${version}
+  buildResources: resources
+files:
+  - out/**/*
+  - resources/icon.png
+  - package.json
+  - "!**/*.map"
+extraResources:
+  - from: resources/knowledge
+    to: knowledge
+asarUnpack:
+  - node_modules/better-sqlite3/**
+  - node_modules/@lydell/**
+# better-sqlite3 v13 and @lydell/node-pty ship N-API prebuilds; no native rebuild needed.
+npmRebuild: false
+win:
+  icon: resources/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  artifactName: LocalCode-AI-Studio-${version}-win-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: LocalCode-AI-Studio-Setup-${version}.${ext}
+mac:
+  icon: resources/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  artifactName: LocalCode-AI-Studio-${version}-mac-${arch}.${ext}
+linux:
+  icon: resources/icon.png
+  category: Development
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  artifactName: LocalCode-AI-Studio-${version}-linux-${arch}.${ext}
+  maintainer: LocalCode AI Studio
