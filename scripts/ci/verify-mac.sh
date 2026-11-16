@@ -4,8 +4,9 @@
 set -uo pipefail
 
 FAILED=0
-note() { echo "::notice title=$1::$(printf '%s' "$2" | head -c 1500 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; }
-fail() { echo "::error title=$1::$(printf '%s' "$2" | head -c 3000 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; FAILED=1; }
+enc() { local m="${1:0:3000}"; m="${m//'%'/'%25'}"; m="${m//$'\r'/}"; printf '%s' "${m//$'\n'/'%0A'}"; }
+note() { echo "::notice title=$1::$(enc "$2")"; }
+fail() { echo "::error title=$1::$(enc "$2")"; FAILED=1; }
 
 check_app() {
   local APP="$1" ARCHCMD="$2" LABEL="$3"
@@ -14,8 +15,9 @@ check_app() {
   OUT=$(codesign --verify --deep --strict --verbose=2 "$APP" 2>&1) || fail "$LABEL codesign verify" "$OUT"
   note "$LABEL signature" "$(codesign -dv "$APP" 2>&1 | grep -E '^(Identifier|Format|Signature|TeamIdentifier|CodeDirectory)' )"
   local BIN="$APP/Contents/MacOS/LocalCode AI Studio"
-  local M="$APP/Contents/Resources/app.asar.unpacked/node_modules"
-  note "$LABEL unpacked modules" "$(ls "$M" "$M/@lydell" 2>&1 | tr '\n' ' ')"
+  # Load modules through app.asar exactly like the app does (Electron redirects .node files to app.asar.unpacked).
+  local M="$APP/Contents/Resources/app.asar/node_modules"
+  note "$LABEL unpacked modules" "$(ls "$APP/Contents/Resources/app.asar.unpacked/node_modules/@lydell" 2>&1 | tr '\n' ' ')"
   OUT=$(ELECTRON_RUN_AS_NODE=1 $ARCHCMD "$BIN" -e "
     const D = require('$M/better-sqlite3'); const db = new D(':memory:');
     db.exec('create virtual table t using fts5(x)'); console.log('sqlite ok', process.arch);
