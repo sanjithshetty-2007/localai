@@ -17,6 +17,7 @@ import { addAttachmentFromPath, addImageFromDataUrl, removeAttachment } from '..
 import { applyChangeSet, loadChangeSet, proposeEdit, rejectChangeSet, undoChangeSet } from '../services/file-actions'
 import { KnowledgeLibrary, migrateKnowledge } from '../services/knowledge'
 import { SetupManager } from '../services/setup'
+import { Updater } from '../services/updater'
 
 export const TITLEBAR_COLORS: Record<ThemeName, { color: string; symbolColor: string }> = {
   dark: { color: '#3c3c3c', symbolColor: '#cccccc' },
@@ -24,6 +25,7 @@ export const TITLEBAR_COLORS: Record<ThemeName, { color: string; symbolColor: st
 }
 
 let runner: CodeRunner | null = null
+let updaterRef: Updater | null = null
 let terminals: TerminalManager | null = null
 let watcher: fsx.WorkspaceWatcher | null = null
 const pulls = new Map<string, AbortController>()
@@ -132,6 +134,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     }
     const next = saveSettings(patch)
     if (patch.ollamaUrl) ollama.setBaseUrl(patch.ollamaUrl)
+    if (patch.autoUpdate !== undefined) updaterRef?.start(patch.autoUpdate)
     return next
   })
   handle('hardware:detect', () => detectHardware())
@@ -310,6 +313,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   })
   ipcMain.on('terminal:resize', (_e, id: string, cols: number, rows: number) => terminals!.resize(String(id), Number(cols), Number(rows)))
   ipcMain.on('terminal:kill', (_e, id: string) => terminals!.kill(String(id)))
+
+  // ---------- updates (GitHub Releases) ----------
+  const updater = new Updater((s) => send('updates:state', s))
+  updaterRef = updater
+  updater.start(getSettings().autoUpdate)
+  handle('updates:state', () => updater.getState())
+  handle('updates:check', () => updater.check())
+  handle('updates:install', () => updater.install())
 
   // ---------- first-run setup ----------
   const setup = new SetupManager(ollama, (p) => send('setup:progress', p))

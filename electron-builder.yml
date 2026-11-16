@@ -17,6 +17,12 @@ asarUnpack:
   - node_modules/@lydell/**
 # better-sqlite3 v13 and @lydell/node-pty ship N-API prebuilds; no native rebuild needed.
 npmRebuild: false
+# Update source for installed copies (electron-updater reads app-update.yml generated from this).
+publish:
+  - provider: github
+    owner: sanjithshetty-2007
+    repo: localai
+    releaseType: release
 win:
   icon: resources/icon.png
   target:

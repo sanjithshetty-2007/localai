@@ -21,6 +21,7 @@ import type {
   SearchHit,
   SetupProgress,
   SetupStatus,
+  UpdateState,
   Settings,
   ThemeName
 } from './types'
@@ -108,6 +109,12 @@ export interface LocalCodeApi {
     kill(id: string): void
     onData(cb: (id: string, data: string) => void): Unsubscribe
     onExit(cb: (id: string, code: number) => void): Unsubscribe
+  }
+  updates: {
+    state(): Promise<UpdateState>
+    check(): Promise<UpdateState>
+    install(): Promise<void>
+    onState(cb: (s: UpdateState) => void): Unsubscribe
   }
   setup: {
     status(): Promise<SetupStatus>

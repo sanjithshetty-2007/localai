@@ -102,6 +102,51 @@ export function slidePassages(pages: string[], target = 1400): { cleaned: string
   return { cleaned, passages }
 }
 
+/**
+ * Detects degenerate reasoning loops in a streamed text: every `window` characters it measures
+ * what share of the new window's word 5-grams already appeared earlier. It only fires when that
+ * share stays at or above `threshold` for `consecutive` windows in a row — far above the
+ * restating that normal careful reasoning does (measured ~7–42% on deepseek-r1:8b).
+ */
+export class RepetitionMonitor {
+  private seen = new Set<string>()
+  private buf = ''
+  private carry: string[] = []
+  private hits = 0
+  lastOverlap = 0
+
+  constructor(
+    private window = 1500,
+    private threshold = 0.5,
+    private consecutive = 2
+  ) {}
+
+  private grams(words: string[]): string[] {
+    const out: string[] = []
+    for (let i = 0; i + 5 <= words.length; i++) out.push(words.slice(i, i + 5).join(' '))
+    return out
+  }
+
+  /** Feed new text; returns true once a sustained loop is detected. */
+  push(text: string): boolean {
+    this.buf += text
+    let fired = false
+    while (this.buf.length >= this.window) {
+      const chunk = this.buf.slice(0, this.window)
+      this.buf = this.buf.slice(this.window)
+      const words = [...this.carry, ...chunk.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean)]
+      const grams = this.grams(words)
+      const repeated = grams.filter((g) => this.seen.has(g)).length
+      this.lastOverlap = grams.length ? repeated / grams.length : 0
+      for (const g of grams) this.seen.add(g)
+      this.carry = words.slice(-4)
+      this.hits = this.seen.size > grams.length && this.lastOverlap >= this.threshold ? this.hits + 1 : 0
+      if (this.hits >= this.consecutive) fired = true
+    }
+    return fired
+  }
+}
+
 export function cosine(a: Float32Array, b: Float32Array): number {
   let dot = 0
   let na = 0

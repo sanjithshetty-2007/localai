@@ -53,6 +53,7 @@ export function SettingsView() {
   const workspace = useApp((s) => s.workspace)
   const indexStatus = useApp((s) => s.indexStatus)
   const conversations = useApp((s) => s.conversations)
+  const update = useApp((s) => s.update)
   const { updateSettings, refreshOllama, detectHardware, toast, confirm, deleteConversation } = useApp.getState()
   const [url, setUrl] = useState(settings?.ollamaUrl ?? '')
   const [customModel, setCustomModel] = useState('')
@@ -356,6 +357,16 @@ export function SettingsView() {
           <Field label="Keep model loaded for" description='How long Ollama keeps a model in memory after a request (keep_alive), e.g. "10m", "30m", "0".'>
             <TextInput className="w-[120px]" defaultValue={settings.keepAlive} onBlur={(e) => e.target.value.trim() && void updateSettings({ keepAlive: e.target.value.trim() })} />
           </Field>
+          <Field
+            label="Reasoning depth"
+            description="How long the reasoning model (deepseek-r1) may think before answering. If it hasn't finished when the limit is reached, the coding or conversation model writes the final answer from its reasoning. Deeper thinking needs a larger context, so it is slower and uses more memory."
+          >
+            <Select value={settings.reasoningBudget} onChange={(e) => void updateSettings({ reasoningBudget: Number(e.target.value) })}>
+              <option value={8192}>Standard: 8K thinking tokens (≈2–4 min)</option>
+              <option value={16384}>Extended: 16K thinking tokens (≈5–9 min)</option>
+              <option value={24576}>Maximum: 24K thinking tokens (≈8–15 min)</option>
+            </Select>
+          </Field>
           <Field label="Agent steps" description="How many times the assistant may read files and continue before answering.">
             <Select value={settings.maxAgentSteps} onChange={(e) => void updateSettings({ maxAgentSteps: Number(e.target.value) })}>
               {[1, 2, 3, 4, 6, 8].map((n) => (
@@ -474,6 +485,35 @@ export function SettingsView() {
         </Section>
 
         <Section id="about" title="About">
+          <div className="flex flex-col gap-2 rounded-[2px] border border-line bg-sidebar p-3">
+            <div className="text-ui font-semibold text-fg">Updates</div>
+            <div className="text-ui-sm text-muted">
+              {update?.status === 'checking' && 'Checking GitHub for a new version…'}
+              {update?.status === 'latest' && `You have the latest version (${update.currentVersion}).`}
+              {update?.status === 'downloading' && `Downloading ${update.latestVersion}: ${update.percent ?? 0}%`}
+              {update?.status === 'ready' && `Version ${update.latestVersion} is downloaded. It installs when you close the app.`}
+              {update?.status === 'available' && `Version ${update.latestVersion} is available.`}
+              {update?.status === 'error' && `Could not check: ${update.error}`}
+              {update?.status === 'unsupported' && update.error}
+              {(!update || update.status === 'idle') && `Version ${info?.version ?? ''}.`}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" icon={RefreshCw} busy={update?.status === 'checking'} onClick={() => void api.updates.check()}>
+                Check for updates
+              </Button>
+              {(update?.status === 'ready' || update?.status === 'available') && (
+                <Button size="sm" icon={Download} onClick={() => void api.updates.install()}>
+                  {update.status === 'ready' ? 'Restart to update' : 'Download update'}
+                </Button>
+              )}
+            </div>
+            <Toggle
+              checked={settings.autoUpdate}
+              onChange={(v) => void updateSettings({ autoUpdate: v })}
+              label="Check for updates automatically"
+              description={`Contacts github.com only, to look for new versions. ${platform === 'darwin' ? 'On macOS you are offered the new download.' : 'On Windows updates download in the background and install when you close the app.'}`}
+            />
+          </div>
           <div className="grid max-w-[640px] grid-cols-[140px_1fr] gap-x-3 gap-y-1 text-ui-sm">
             <span className="text-muted">Version</span>
             <span>{info?.version}</span>

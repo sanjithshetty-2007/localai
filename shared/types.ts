@@ -42,6 +42,8 @@ export interface Settings {
   knowledgeEnabled: boolean
   presetVersion: number
   setupDone: boolean
+  autoUpdate: boolean
+  reasoningBudget: number
 }
 
 export interface GpuInfo {
@@ -314,6 +316,17 @@ export interface KnowledgeProgress {
   stage: 'extracting' | 'embedding' | 'ready' | 'error'
   done: number
   total: number
+  error?: string
+}
+
+// ---------- Updates ----------
+
+export interface UpdateState {
+  status: 'idle' | 'checking' | 'latest' | 'available' | 'downloading' | 'ready' | 'error' | 'unsupported'
+  currentVersion: string
+  latestVersion?: string
+  percent?: number
+  checkedAt?: number
   error?: string
 }
 

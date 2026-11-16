@@ -110,7 +110,9 @@ export const DEFAULT_SETTINGS: Settings = {
   aiSidebarWidth: 400,
   knowledgeEnabled: true,
   presetVersion: PRESET_VERSION,
-  setupDone: false
+  setupDone: false,
+  autoUpdate: true,
+  reasoningBudget: 8192
 }
 
 export function getSettings(): Settings {

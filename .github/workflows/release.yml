@@ -70,6 +70,8 @@ jobs:
             release/*/*-win-*.zip
             release/*/*.dmg
             release/*/*.AppImage
+            release/*/latest*.yml
+            release/*/*.blockmap
           if-no-files-found: ignore
 
       - uses: softprops/action-gh-release@v2
@@ -80,4 +82,6 @@ jobs:
             release/*/*-win-*.zip
             release/*/*.dmg
             release/*/*.AppImage
+            release/*/latest*.yml
+            release/*/*.blockmap
           fail_on_unmatched_files: false

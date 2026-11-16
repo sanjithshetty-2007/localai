@@ -16,7 +16,8 @@ import type {
   RunEvent,
   RunProblem,
   RunResult,
-  Settings
+  Settings,
+  UpdateState
 } from '@shared/types'
 import { api, basename, errorMessage, languageFor, relativePath, samePath, stripAnsi } from '@/lib/api'
 import { disposeModel, getModel, replaceModelText } from '@/editor/monaco'
@@ -143,6 +144,7 @@ interface State {
   knowledgeDocs: KnowledgeDoc[]
   knowledgeProgress: Record<string, KnowledgeProgress>
   setupOpen: boolean
+  update: UpdateState | null
 
   toasts: Toast[]
   confirmReq: ConfirmRequest | null
@@ -272,6 +274,7 @@ export const useApp = create<State & Actions>((set, get) => ({
   knowledgeDocs: [],
   knowledgeProgress: {},
   setupOpen: false,
+  update: null,
   toasts: [],
   confirmReq: null,
   promptReq: null,
@@ -916,6 +919,14 @@ function subscribeEvents(set: (p: Partial<State> | ((s: State) => Partial<State>
   })
 
   api.memory.onIndexStatus((s) => set({ indexStatus: s }))
+
+  void api.updates.state().then((u) => set({ update: u }))
+  api.updates.onState((u) => {
+    const prev = get().update?.status
+    set({ update: u })
+    if (u.status === 'ready' && prev !== 'ready') get().toast('success', `Update ${u.latestVersion} is ready. It installs when you close the app, or click the status bar to restart now.`)
+    if (u.status === 'available' && prev !== 'available') get().toast('info', `LocalCode AI Studio ${u.latestVersion} is available. Click the status bar to download it.`)
+  })
 
   api.knowledge.onProgress((p) => {
     set((s) => ({ knowledgeProgress: { ...s.knowledgeProgress, [p.docId]: p } }))

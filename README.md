@@ -21,6 +21,8 @@ You only need to download one file. The app installs everything else on first la
    - **Download models**: one click. That's about 26 GB for Balanced or 21 GB for Lite. A download that stalls resumes on its own, and **Pause** keeps what has already downloaded.
 4. Click **Finish**. From now on everything runs **offline**.
 
+**Updates:** from version 1.0.4 on, the Windows app updates itself. It checks GitHub, downloads new versions in the background, and installs them when you close the app (or click **Restart to update** in the status bar). On macOS the app tells you when a new version is out and opens the download. Turn this off under **Settings → About → Check for updates automatically**; it only ever contacts github.com. Copies older than 1.0.4 need to install the new version once by hand.
+
 Recommended hardware: Windows 10/11 64-bit, an NVIDIA GPU with 6 GB+ VRAM, 16 GB+ RAM (24–32 GB is better), and about 35 GB of free disk. It also runs on the CPU only, but slowly.
 
 Optional:
@@ -71,7 +73,7 @@ The assistant picks one of these internal models for each request:
 |---|---|---|
 | Conversation | `qwen3:8b` | General questions, explanations, documents (thinking mode off for speed) |
 | Code | `qwen2.5-coder:14b` on Balanced (split GPU + RAM, ~14 tok/s) · `qwen2.5-coder:7b` on Lite | Writing and editing files, debugging, fixing errors, repository questions. Every C/C++/Java/Python answer is compile-checked (never run) and repaired automatically, up to two rounds. |
-| Reasoning | `deepseek-r1:8b` | Algorithms, maths, OS/scheduling problems, step-by-step work (its reasoning appears under "Reasoning" in the chat) |
+| Reasoning | `deepseek-r1:8b` | Algorithms, maths, OS/scheduling problems, step-by-step work (its reasoning appears under "Reasoning" in the chat). Prompted the way DeepSeek recommends for R1 (no system prompt, temperature 0.6, top_p 0.95), with a context window sized so the question is never pushed out. **Settings → Generation → Reasoning depth** sets how long it may think: 8K, 16K or 24K tokens. This R1-0528 distill often deliberates past any budget; when it runs out, or a loop detector sees sustained repetition (≥50%), the coding or conversation model writes the final answer from its reasoning, and code is compile-checked. |
 | Vision | `qwen2.5vl:7b` | Screenshots and images. It reads the image, then the conversation or code model writes the answer. |
 | Embeddings | `nomic-embed-text` | Semantic search over your knowledge library (syllabus, notes) |
 

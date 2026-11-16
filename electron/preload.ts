@@ -92,6 +92,12 @@ const api: LocalCodeApi = {
     onData: (cb) => on('terminal:data', cb),
     onExit: (cb) => on('terminal:exit', cb)
   },
+  updates: {
+    state: inv('updates:state') as LocalCodeApi['updates']['state'],
+    check: inv('updates:check') as LocalCodeApi['updates']['check'],
+    install: inv('updates:install') as LocalCodeApi['updates']['install'],
+    onState: (cb) => on('updates:state', cb)
+  },
   setup: {
     status: inv('setup:status') as LocalCodeApi['setup']['status'],
     installOllama: inv('setup:installOllama') as LocalCodeApi['setup']['installOllama'],

@@ -13,9 +13,31 @@ import type { CodeRunner } from '../terminal/runner'
 import { getWorkspaceRoot, resolveInWorkspace, toRelative } from '../security/paths'
 import { searchWorkspace } from '../filesystem/fs-service'
 import { collectCodeFiles, compileCheck } from './compile-check'
+import { RepetitionMonitor } from './text-utils'
 import * as memory from './memory'
 
 type Role = 'general' | 'coder' | 'reasoning' | 'vision'
+
+/** Rough token count for sizing the context window (≈3.2 characters per token). */
+function estimateTokens(messages: OllamaChatMessage[]): number {
+  return Math.ceil(messages.reduce((n, m) => n + m.content.length, 0) / 3.2) + messages.length * 8
+}
+
+const REASONING_GUIDE =
+  '\n\nThink it through carefully. Once you have an approach and have checked it (including edge cases), stop deliberating and give the final answer: the approach in clear steps, time and space complexity, and complete, working code when code is requested.'
+
+/**
+ * DeepSeek recommends no system prompt for R1 models: fold system instructions into the
+ * current user message (history stays as it is) and add a short answer-format guide.
+ */
+function toReasoningMessages(messages: OllamaChatMessage[]): OllamaChatMessage[] {
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.content)
+  const rest = messages.filter((m) => m.role !== 'system')
+  const last = rest[rest.length - 1]
+  if (!last || last.role !== 'user') return messages
+  const merged: OllamaChatMessage = { ...last, content: `${system.join('\n\n')}\n\n${last.content}${REASONING_GUIDE}` }
+  return [...rest.slice(0, -1), merged]
+}
 
 const FILLER = new Set('a an the and or but so to of in on for with is are was be it its that this those these them they he she do does did can could would should will please me my i you your we our what why how which who when where about more elaborate explain example examples again also same above previous continue tell show give detail details further elaborate one some any just like there here then than'.split(' '))
 
@@ -27,7 +49,10 @@ export function isFollowUp(text: string): boolean {
 
 const EMBED_RE = /embed|bge|nomic|minilm|e5-/i
 // Thinking models (deepseek-r1, qwen3) get a bounded reasoning budget (~1.5 min on an 8 GB GPU).
-const REASONING_TOKEN_CAP = 6000
+const ANSWER_TOKENS = 2560 // room for the final answer after thinking
+const MAX_REASONING_CTX = 32768
+// Questions whose answer should include code (finished by the coding model if reasoning runs out).
+const CODE_ANSWER_RE = /\b(code|program|implement|function|solution|leetcode|c\+\+|cpp|java|python|javascript|write)\b/i
 
 /**
  * The single orchestration layer. Every AI interaction — chat, coding, debugging,
@@ -285,53 +310,97 @@ export class Orchestrator {
           knowledge: knowledgeBlock
         })
         if (step === 0 && built.included.length) meta.steps!.push('Context: ' + built.included.join(', '))
-        const messages: OllamaChatMessage[] = built.messages
+        // Thinking models follow DeepSeek's guidance for R1: no system prompt (everything goes in the
+        // user turn), temperature 0.6, top_p 0.95 — and a context window large enough for the prompt
+        // plus the whole thinking budget plus the answer, so the question is never pushed out.
+        // Thinking budget from Settings → Reasoning depth (never below the 8K standard default's floor of 4K).
+        const REASONING_TOKEN_CAP = Math.min(24576, Math.max(4096, settings.reasoningBudget || 8192))
+        const messages: OllamaChatMessage[] = think ? toReasoningMessages(built.messages) : built.messages
+        const promptTokens = estimateTokens(messages)
+        const numCtx = think
+          ? Math.min(MAX_REASONING_CTX, Math.max(settings.numCtx, Math.ceil((promptTokens + REASONING_TOKEN_CAP + ANSWER_TOKENS) / 1024) * 1024))
+          : settings.numCtx
+        if (think && step === 0) meta.steps!.push(`Reasoning: context ${numCtx} tokens (prompt ≈${promptTokens} + thinking budget ${REASONING_TOKEN_CAP} + answer ${ANSWER_TOKENS})`)
         status(step === 0 ? `Thinking with ${mainModel}…` : `Continuing with ${mainModel}…`)
         let stepText = ''
         // deepseek-r1 is tuned for temperature ~0.6; code and fixes stay deterministic.
         const temperature = think ? 0.6 : route === 'code' || route === 'debug' ? Math.min(settings.temperature, 0.3) : settings.temperature
-        // Cap generation so a model can never run on indefinitely (Ollama shifts the context window past num_ctx).
-        const numPredict = think ? REASONING_TOKEN_CAP : Math.max(1024, Math.floor(settings.numCtx * 0.6))
+        const topP = think ? 0.95 : settings.topP
+        // Cap generation so a model can never run on indefinitely.
+        const numPredict = think ? REASONING_TOKEN_CAP + ANSWER_TOKENS : Math.max(1024, Math.floor(settings.numCtx * 0.6))
         const onToken = (t: string) => {
           stepText += t
           this.emit({ type: 'token', ...ev, text: t })
         }
-        let r = await this.ollama.chat({
-          model: mainModel,
-          messages,
-          options: { num_ctx: settings.numCtx, temperature, top_p: settings.topP, num_predict: numPredict },
-          keepAlive: settings.keepAlive,
-          think,
-          signal: ctrl.signal,
-          onToken,
-          onThinking: (t) => {
-            thinking += t
-            this.emit({ type: 'thinking', ...ev, text: t })
-          }
-        })
-        if (think && !r.content.trim()) {
-          // The reasoning budget ran out before an answer: the conversation model writes the
-          // final answer from the reasoning so far (one combined reply, two models).
-          const writer = this.pick('general', settings, installed) ?? mainModel
-          meta.steps!.push(`Reasoning reached ${REASONING_TOKEN_CAP} tokens; ${writer} wrote the final answer from it`)
-          status(`Reasoning ran long — ${writer} is writing the answer…`)
+        // Guards on the thinking stream: the token budget, and a detector for degenerate loops
+        // (it only fires on sustained >=50% repetition, well above normal restating).
+        const stepCtrl = new AbortController()
+        const relayAbort = () => stepCtrl.abort()
+        ctrl.signal.addEventListener('abort', relayAbort)
+        const loops = new RepetitionMonitor()
+        let thinkStop: 'budget' | 'loop' | null = null
+        let stepThinking = ''
+        let thinkTokens = 0 // Ollama streams about one token per chunk
+        let r: { content: string; thinking: string }
+        try {
+          r = await this.ollama.chat({
+            model: mainModel,
+            messages,
+            options: { num_ctx: numCtx, temperature, top_p: topP, num_predict: numPredict },
+            keepAlive: settings.keepAlive,
+            think,
+            signal: stepCtrl.signal,
+            onToken,
+            onThinking: (t) => {
+              thinking += t
+              stepThinking += t
+              this.emit({ type: 'thinking', ...ev, text: t })
+              if (!think || thinkStop) return
+              thinkTokens++
+              if (thinkTokens > REASONING_TOKEN_CAP) thinkStop = 'budget'
+              else if (loops.push(t)) thinkStop = 'loop'
+              if (thinkStop) stepCtrl.abort()
+            }
+          })
+        } catch (e) {
+          if (!thinkStop || ctrl.signal.aborted) throw e
+          r = { content: stepText, thinking: stepThinking }
+        } finally {
+          ctrl.signal.removeEventListener('abort', relayAbort)
+        }
+        if (think && (thinkStop || !r.content.trim())) {
+          // The reasoning ended without an answer (budget reached or a loop): a second model writes
+          // the final answer from the reasoning — the coding model when code is asked for.
+          const wantsCode = CODE_ANSWER_RE.test(req.text)
+          const writer = (wantsCode ? this.pick('coder', settings, installed) : this.pick('general', settings, installed)) ?? mainModel
+          meta.steps!.push(
+            thinkStop === 'loop'
+              ? `Reasoning started repeating itself (${Math.round(loops.lastOverlap * 100)}% repeated); ${writer} wrote the final answer from it`
+              : `Reasoning used its full ${REASONING_TOKEN_CAP}-token budget; ${writer} wrote the final answer from it`
+          )
+          status(`Writing the final answer with ${writer}…`)
           await this.ensureResident(writer, settings, status)
           if (!meta.models!.includes(writer)) meta.models!.push(writer)
           const writerCaps = installed.find((m) => m.name === writer)?.capabilities ?? []
+          const draft = thinking.slice(-14000)
           r = await this.ollama.chat({
             model: writer,
             messages: [
-              { role: 'system', content: 'You turn a draft line of reasoning into a clear, correct final answer. Check the reasoning, fix any mistakes, and show the key steps briefly.' },
-              { role: 'user', content: `Question:\n${req.text}\n\nDraft reasoning (may be unfinished):\n${thinking.slice(-12000)}\n\nWrite the final answer.` }
+              {
+                role: 'system',
+                content:
+                  'You write the final answer from a reasoning model\'s notes. The notes may be unfinished or repetitive: keep their correct conclusions, check them, fix any mistakes, and do not repeat the deliberation. ' +
+                  'Answer with: the approach in a few clear steps, time and space complexity, and complete, working code when code is requested.'
+              },
+              { role: 'user', content: `Question:\n${req.text}\n\nReasoning notes:\n${draft}\n\nWrite the final answer.` }
             ],
-            options: { num_ctx: settings.numCtx, temperature: 0.3, top_p: settings.topP, num_predict: 2048 },
+            options: { num_ctx: Math.max(settings.numCtx, Math.ceil((estimateTokens([{ role: 'user', content: draft + req.text }]) + 3072) / 1024) * 1024), temperature: 0.3, top_p: settings.topP, num_predict: 3072 },
             keepAlive: settings.keepAlive,
             think: writerCaps.includes('thinking') ? false : undefined,
             signal: ctrl.signal,
             onToken
           })
-        }
-        content += r.content
+        }        content += r.content
         const parsed = parseActions(r.content)
         const reads = parsed.actions.filter((a) => a.type === 'read_file' || a.type === 'search_files')
         const writes = parsed.actions.filter((a) => a.type !== 'read_file' && a.type !== 'search_files')
@@ -368,7 +437,10 @@ export class Orchestrator {
       }
 
       // ---- Compile check: verify generated C/C++/Java/Python and let the model repair errors ----
-      if ((route === 'code' || route === 'debug' || route === 'document') && !ctrl.signal.aborted) {
+      if ((route === 'code' || route === 'debug' || route === 'document' || route === 'reasoning') && !ctrl.signal.aborted) {
+        // Repairs use the coding model on the reasoning route (no second long deliberation).
+        const repairModel = route === 'reasoning' ? (this.pick('coder', settings, installed) ?? mainModel) : mainModel
+        const repairCaps = installed.find((m) => m.name === repairModel)?.capabilities ?? []
         let files = collectCodeFiles(content)
         const named = files.some((f) => !f.name.startsWith('snippet'))
         for (let round = 1; round <= 2 && files.length; round++) {
@@ -379,7 +451,7 @@ export class Orchestrator {
             meta.steps!.push(`Compile check passed (${rep.checked.join(', ')})${round > 1 ? ' after repair' : ''}`)
             break
           }
-          meta.steps!.push(`Compile check found errors (round ${round}); ${mainModel} is repairing them`)
+          meta.steps!.push(`Compile check found errors (round ${round}); ${repairModel} is repairing them`)
           if (round === 2) {
             meta.steps!.push('Still not compiling after two repairs')
             const note = `\n\n> Compile check: the code still has errors after two automatic repairs:\n> \`${rep.errors.split('\n')[0].slice(0, 200)}\``
@@ -392,8 +464,10 @@ export class Orchestrator {
           content += header
           this.emit({ type: 'token', ...ev, text: header })
           const listing = files.map((f) => `\`\`\`${f.lang}${named ? ` file=${f.name}` : ''}\n${f.content}\n\`\`\``).join('\n\n')
+          if (repairModel !== mainModel || round === 1) await this.ensureResident(repairModel, settings, status)
+          if (!meta.models!.includes(repairModel)) meta.models!.push(repairModel)
           const fix = await this.ollama.chat({
-            model: mainModel,
+            model: repairModel,
             messages: [
               { role: 'system', content: 'You fix compile errors. Keep the same design and the same structure the user asked for; change only what is needed to compile correctly. Output every file in full.' },
               {
@@ -403,7 +477,7 @@ export class Orchestrator {
             ],
             options: { num_ctx: settings.numCtx, temperature: 0.2, top_p: settings.topP, num_predict: Math.max(1024, Math.floor(settings.numCtx * 0.6)) },
             keepAlive: settings.keepAlive,
-            think: mainCaps.includes('thinking') ? false : undefined,
+            think: repairCaps.includes('thinking') ? false : undefined,
             signal: ctrl.signal,
             onToken: (t) => this.emit({ type: 'token', ...ev, text: t })
           })

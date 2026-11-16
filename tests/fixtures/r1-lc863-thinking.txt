@@ -1,0 +1,232 @@
+
+We are going to solve LeetCode 863: All Nodes Distance K in Binary Tree.
+ The problem: Given the root of a binary tree, a target node, and an integer k, return the values of all nodes that are at distance k from the target.
+
+ Approach:
+ We cannot use the typical tree traversal from root because the target might be anywhere in the tree.
+ We need to consider the path from the root to the target, and then from the target, we go upward (towards the root) and downward (away from the root) but avoiding the upward path (which would cause cycles).
+
+ Steps:
+ 1. We need to find the path from the root to the target (ancestors) and also the direction from the target to each node (left/right).
+ 2. We can perform a BFS starting from the target, but we must avoid going back through the parent's direction for the nodes that are in the path from the root to the target.
+
+ However, note that the problem does not require the nodes to be in a particular order (just the values). We can collect the nodes by:
+ - Doing a BFS from the target, but we have to mark the parent's direction so that we don't go back.
+
+ Alternatively, we can do:
+ - Use DFS to find the target and record the path (the ancestors and the direction to the target from each ancestor).
+ - Then, we can traverse from the target downward (both left and right) and also from the target upward (but only through the recorded ancestors) and then consider the rest of the tree (excluding the path to the target) for downward directions.
+
+ But note: the problem says "distance K", so we need to consider all nodes that are K edges away from the target, but without including the nodes that are on the path from the root to the target (because they are closer and we don't want to go back).
+
+ We can break the problem into two parts:
+ a) Nodes that are in the subtree of the target (going down) and are at distance k from the target (without going up).
+ b) Nodes that are the ancestors of the target (excluding the target) and are at distance k from the target, but we have to consider that when moving upward, we cannot then go back down the same path.
+
+ However, note that the nodes in the path from root to target are not allowed to be used as the direction to go upward because that would go back to the root and then we might get nodes that are not at distance k.
+
+ We can do:
+ 1. Find the target node and the path from root to target (the parent pointers and the direction from parent to target).
+ 2. We'll use a BFS starting from the target, but we have to avoid going back to the parent node (the one from which we came) for the upward direction. However, note that the target might have multiple ways to reach a node? No, because the tree is a tree (acyclic). But the issue is that we cannot use the parent's direction.
+
+ However, the problem is that we are in a binary tree and the target is a node. We need to consider two kinds of paths:
+ - The downward paths from the target (both left and right subtrees) without going back to the parent.
+ - The upward paths from the target, which go through the parent, but then we have to avoid going back down the same branch.
+
+ We can do:
+ - Use a BFS that starts from the target and goes in all directions, but we have to mark the node we came from (the parent) so that we don't go back.
+
+ But note: the ancestors are not necessarily the only ones we need to avoid. We can also avoid the entire path from root to target by keeping track of the visited nodes.
+
+ Alternatively, we can do:
+ 1. Use DFS to record the parent-child relationships (without cycles) and then do BFS from the target, but we have to avoid going back to the parent.
+
+ However, let me think of a standard approach:
+
+ We can use a BFS that starts from the target and goes in three directions? Actually, we have to avoid the parent's direction only for the first step (when going upward). Then, when we are at a node above the target, we have to avoid going back down the same branch.
+
+ We can do:
+ - First, we need to find the target and the path from root to target (so we can avoid going back along that path).
+ - Then, we can do a BFS starting from the target, but we have to avoid the parent node (the one we came from) and also avoid the other nodes that are in the path from root to target (so we don't go back up the tree more than once).
+
+ Actually, we can do:
+ 1. Find the target and the parent pointers (and the direction from the parent to the target) by doing a DFS from the root.
+ 2. Then, we can do a BFS starting from the target, but we will keep a set of visited nodes (or a parent pointer set) to avoid revisiting the same node.
+
+ However, note that the problem does not specify that the tree is a binary search tree, so we cannot rely on node values for ordering.
+
+ Another approach:
+ - We can do a BFS from the root to the target to record the path (the ancestors and the direction from each node to the target).
+ - Then, we can do a BFS from the target, but we are allowed to go downward (both left and right) and upward (only to the parent, but then we have to avoid going back down the same branch).
+
+ We can do:
+ 1. Let's define a function to find the target and the path (parent pointers and the direction from parent to target). We can store the parent of each node and the direction (if the parent came from the left or right of the current node).
+ 2. Then, we do a BFS starting from the target, but we are going to consider two types of nodes:
+    - The nodes that are in the subtree of the target (we can traverse left and right without restriction, because they are not on the path to root).
+    - The nodes that are the ancestors (we can traverse upward, but only one step per ancestor, and then from that ancestor we can traverse downward but not through the same child that leads to the target).
+
+ But note: the condition is that we cannot go back to the node we came from (the parent). So we can do:
+
+ We'll do:
+ - Step 1: Find the target node and the path from root to target (and record the parent and the direction for each node on the path). We can store the parent of each node and the side (left or right) from which the parent was reached (for the target node, we know the parent and the side; for the root, we don't have a parent, so we stop when we reach the root).
+
+ - Step 2: We'll do a BFS from the target, but we have to avoid going back to the parent. We can start by pushing the target node with distance 0, and then we can push its left and right children (if they exist) at distance 1, but then also we can push the parent of the target (if it exists) at distance 1? Wait, no: the parent is at distance 1, but then from the parent we can go to the other child (if exists) at distance 2, etc.
+
+ However, note that the problem says "distance K", so we need to consider nodes that are exactly K edges away.
+
+ We can use a queue that holds (node, distance, parent) or (node, distance, forbidden child). But we don't need to store parent if we are using a visited set.
+
+ Alternatively, we can do:
+
+ - Let's record the parent of each node (from the DFS that found the target) and then do a BFS from the target, but we have to avoid the node that we came from (the parent) and also avoid the entire path from root to target (because we don't want to go back up the tree beyond the parent of the target).
+
+ But note: we are only allowed to go up until the root, and then from the ancestors we can go down, but we must not go down the same branch that leads to the target.
+
+ We can do:
+
+ 1. Find the target node and the path (so we know the parent of the target and the direction from the target to each child). We can store the parent of each node and the direction (left or right) from the parent to the node (for the target, we know the parent and the direction; for the root, we don't have parent).
+
+ 2. Then, we do a BFS starting from the target, but we allow three directions: left, right, and parent. However, we must avoid going back to the parent of the target (if we go up, we go only one step to the parent, and then from there we can go to the other child and so on). But note: we cannot go back to the parent of the target and then back to the target again.
+
+ So, we can do:
+
+ - We'll use a queue for BFS.
+ - We start by pushing the target node with distance 0, and we mark the target as visited.
+ - Then, we push the left and right children of the target (if they exist) with distance 1, and mark them visited.
+ - Then, we also push the parent of the target (if exists) with distance 1, and then from the parent we can push the other child (if exists and not visited) with distance 2, and so on.
+
+ However, we must avoid going back to the node from which we came (the parent node for the upward direction, and for downward we don't have that issue because we are going from root downward). But note: the downward part (from the target) we don't have to avoid anything because we are going to the children. The upward part we have to avoid going back to the parent (the node we came from) because we don't want to cycle.
+
+ But wait, the problem does not require the nodes to be in a particular order, just the values.
+
+ Let me restructure:
+
+ We can use a BFS that starts from the target and goes in all directions (left, right, and parent) but we must avoid the node that we came from (i.e., when moving upward, we cannot use the same child that we used to get to the target). However, note that the parent of the target is the only node above, and then from the parent we can go to the other child (if exists and not visited) but not the one that leads to the target.
+
+ Steps:
+
+ 1. We need to build the tree (we are given the root, but we don't have the node structure). We'll assume the tree node structure is as in the reference: struct TreeNode { int val; TreeNode *left; TreeNode *right; }
+
+ 2. We'll write a helper function to find the target and record the parent and the direction (whether the target was reached via left or right from the parent). We can do this by DFS (preorder or postorder) from the root.
+
+ 3. We'll then do a BFS starting from the target, but we are allowed to go to:
+    - The left child (if exists) of the target, but we must avoid the parent's left child if we are coming from the parent's side? Actually, we have to avoid the node that we came from (the parent) and also avoid going back to the same node we came from (the parent of the target) in the upward direction.
+
+ However, we can do without explicitly avoiding the parent's other child? We can use a set of visited nodes.
+
+ Let me define:
+
+ - We'll do a DFS to find the target and record the parent and the side (left or right) for each node until the root.
+
+ But note: the problem does not specify that the tree is a binary search tree, so we cannot assume node values for ordering.
+
+ Alternatively, we can do:
+
+ - We'll do a BFS from the root to the target (without cycles) and record the parent and the side for each node on the path.
+
+ Then, we do:
+
+ - Start from the target, and we want to collect all nodes that are exactly k edges away, but we must avoid including the nodes that are in the path from the target to the root (because they are already at a distance less than k and we are not allowed to go back through the same node we came from).
+
+ We can do:
+
+ 1. Find the target and the path (with parent pointers and the side from which we came to the target). We can store the parent of the target and the direction (left or right) from the parent to the target.
+
+ 2. Then, we do a BFS starting from the target, but we are allowed to go in three directions:
+    - Left (if the node has a left child)
+    - Right (if the node has a right child)
+    - Parent (if the node has a parent, but then we cannot go back the same way we came from the parent? Actually, we can go upward and then downward from the parent, but we must avoid the child that we came from (the target) because that would cause a cycle.
+
+ 3. We can use a queue and a visited set. We start by the target node and set distance=0. Then, we push the left and right children (if exists) and the parent (if exists) but then from the parent we can push the other child (if exists and not visited) and so on.
+
+ However, note that the parent of the target is at distance 1, and then from the parent we can go to the other child (if exists) at distance 2, etc.
+
+ But we must avoid the node that we came from. For example, when we are at the parent of the target, we came from the target (so we are using the right side to go upward). Then, when we go downward from the parent, we must avoid the right child (the target) and go to the left child (if exists) only.
+
+ We can do:
+
+ - We'll use a queue that stores (node, distance, fromSide) where fromSide indicates the direction we came from (for downward, we don't have fromSide, but for upward we do). However, we don't need to store the side for the entire BFS? We can store the side for the parent's node.
+
+ Alternatively, we can do:
+
+ 1. We'll first find the target node and the path from root to target, and we'll record the parent and the side (left or right) for the target node and all nodes on the path.
+
+ 2. Then, we do a BFS starting from the target node, but we are allowed to traverse:
+    - The target node's left and right children (without restriction, because they are not on the upward path we are considering yet) but we must avoid the parent node (the one we came from) for the upward direction.
+
+ 3. We'll use a queue and a visited set. We start by the target node with distance 0, and we mark it visited.
+
+ 4. Then, we enqueue the left and right children (if exists) with distance 1, and we enqueue the parent (if exists) with distance 1, but then from the parent we can enqueue the other child (if exists and not visited) with distance 2, etc.
+
+ But wait, the parent is at distance 1, and we are allowed to go to the parent. Then from the parent, we can go to the other child (the one that is not the target) and so on.
+
+ However, we must avoid going back to the node that we came from (the parent for the upward direction, and the target node for the downward direction). But note: the target node is already visited, so we don't go back to it.
+
+ We can do:
+
+ - Let's have a queue and a visited set.
+ - We start by the target node (distance 0) and mark it visited.
+ - Then, we look at the target node's parent (if exists) and the target node's left and right children (if exists). We enqueue all these nodes with distance 1, but then we have to avoid the parent node's other child (if we are coming from the parent, we cannot go back to the target node's sibling, because we already came from the target node's sibling to the parent? Actually, no: the parent node has two children, one is the target and the other is not. We must avoid the target node's sibling? No, because we are going from the parent to the other child, and that other child is the target's sibling, which is allowed as long as we haven't visited it.
+
+ Actually, the issue is that when we are at a node (say, the parent of the target) and we came from the target (so we are at distance 1 from the target), then we can go to the parent's other child (if exists) at distance 2, but we must not go back to the target node (which we already visited). So we can use the visited set to avoid revisiting.
+
+ Steps:
+
+ 1. We need to record the parent and the side for the target node and all nodes on the path from root to target. We can do this by DFS (or BFS) from the root to the target.
+
+ 2. Then, we do a BFS starting from the target node, but we are allowed to traverse:
+    - The left child (if exists) of the target node at distance 1.
+    - The right child (if exists) of the target node at distance 1.
+    - The parent node (if exists) at distance 1.
+
+ 3. Then, from the parent node (if we are at distance 1) we can traverse its left and right children, but we must avoid the child that we came from (the target node). Similarly, from the left child (if we are at distance 1) we can traverse its left and right children and its parent (if exists and not visited) but then we must avoid the child that we came from (the target node) when going downward from the left child.
+
+ Actually, we can do:
+
+ - We'll use a queue and a visited set.
+ - We start by the target node (distance 0) and mark it visited.
+ - Then, we enqueue the parent (if exists) and the left and right children (if exists) with distance 1, but we must avoid the parent if we are not coming from the parent? Actually, we don't have to avoid the parent, we just need to avoid going back the same way we came.
+
+ But note: we are at the target node, and we are going to three directions: parent, left, right. Then, from a node we came from (say, the parent node) we are at distance 1, then we can go to its left and right children (if they exist and not visited) and its parent (if exists and not visited). However, we must avoid the child that we came from (the target node) because that would form a cycle.
+
+ We can do:
+
+ - We'll use a BFS that starts from the target node and goes outwards, but we will keep track of the node we are coming from (the parent node for the upward, and the child node for the downward). We can store the "forbidden" direction for each node (the one that we came from) so that we don't go back.
+
+ However, we can also use a visited set and avoid revisiting the same node. But note: we are going to traverse the entire tree (except the cycle) and we want to avoid cycles.
+
+ Let me think of a simpler way:
+
+ We can do a BFS from the target node, but we are allowed to go to:
+    - The left child (if exists) and the right child (if exists) from the target node (without restriction, because they are not the parent) but we must avoid the parent node (the one we came from) for upward.
+
+ But then, from the parent node we are allowed to go to the other child (if exists and not visited) and so on.
+
+ We can do:
+
+ 1. We'll create a parent map (or parent array) by doing a BFS/DFS from the root to the target. We can store the parent of each node and the side (left or right) that the parent used to reach the node.
+
+ 2. Then, we do a BFS starting from the target node, but we are allowed to traverse:
+    - The left child (if exists) without restriction (unless visited)
+    - The right child (if exists) without restriction (unless visited)
+    - The parent node (if exists) without restriction (unless visited)
+
+ However, we must avoid going back to the node that we came from (the parent node for the upward, and the child node for the downward). But note: we are using a visited set, so we won't revisit the same node.
+
+ But wait, the parent node is the one that leads to the target node, so when we are at the parent node, we came from the target node (so we are at distance 1). Then, from the parent node we can go to the other child (if exists) and to the parent's parent (if exists). We don't have to avoid the target node because it's already visited.
+
+ However, we must avoid the target node's parent's other child (the target node) because we don't want to go back. But that's already handled by the visited set.
+
+ Steps:
+
+ 1. We need to build a parent map (or a parent pointer for each node) and the side (left or right) from which the node was reached (for the target node and its ancestors). We can do this by DFS from the root.
+
+ 2. Then, we do a BFS starting from the target node, and we allow the following:
+    - We start with the target node (distance 0).
+    - Then, we enqueue the target node's left and right children (if exists) and the target node's parent (if exists) with distance 1.
+
+ 3. Then, for each node at distance 1, we enqueue their left and right children (if exists and not visited) and their parent (if exists and not visited) with distance 2.
+
+ 4. We stop when we have collected all nodes at distance k.
+
+ However, note that the target node's parent is at distance 1, and then from that parent we can go to the other child (if exists) and t

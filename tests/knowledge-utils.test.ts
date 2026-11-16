@@ -1,5 +1,7 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { chunkText, cosine, docxXmlToText, extractNumberedSection, rrf, slidePassages } from '../electron/services/text-utils'
+import { chunkText, cosine, docxXmlToText, extractNumberedSection, rrf, slidePassages, RepetitionMonitor } from '../electron/services/text-utils'
 
 const syllabus = `CS301 Operating Systems — Syllabus
 Unit I: Introduction
@@ -24,6 +26,27 @@ describe('syllabus sections', () => {
   it('handles "Module 2:" headings', () => {
     const doc = 'Module 1: Basics\nintro\nModule 2: Trees\nBST, AVL\nModule 3: Graphs\nBFS'
     expect(extractNumberedSection(doc, 'module 2 questions', 500)).toBe('Module 2: Trees\nBST, AVL')
+  })
+})
+
+describe('reasoning loop detection', () => {
+  const feed = (m: RepetitionMonitor, text: string) => {
+    let fired = false
+    for (let i = 0; i < text.length; i += 37) fired = m.push(text.slice(i, i + 37)) || fired
+    return fired
+  }
+  it('does not fire on varied reasoning', () => {
+    const varied = Array.from({ length: 400 }, (_, i) => `Step ${i}: consider node ${i * 7} with depth ${i % 13} and value ${(i * 31) % 97}.`).join(' ')
+    expect(feed(new RepetitionMonitor(), varied)).toBe(false)
+  })
+  it('fires when the same paragraph keeps repeating', () => {
+    const intro = Array.from({ length: 60 }, (_, i) => `Fresh idea ${i} about subtree ${i * 3}.`).join(' ')
+    const para = 'We start the BFS from the target node and enqueue its left child, right child and parent, marking each as visited so we never go back. '
+    expect(feed(new RepetitionMonitor(), intro + para.repeat(60))).toBe(true)
+  })
+  it('does not fire on real deepseek-r1 reasoning that restates (LeetCode 863, 7-42% overlap)', () => {
+    const real = fs.readFileSync(path.join(__dirname, 'fixtures', 'r1-lc863-thinking.txt'), 'utf8')
+    expect(feed(new RepetitionMonitor(), real)).toBe(false)
   })
 })
 
