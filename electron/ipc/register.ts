@@ -79,7 +79,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   const knowledge = new KnowledgeLibrary(ollama, (p) => send('knowledge:progress', p))
   // Built-in DSA reference shipped with the app (re-installed when its version changes).
   const dsaRef = app.isPackaged ? path.join(process.resourcesPath, 'knowledge', 'dsa-reference.md') : path.join(app.getAppPath(), 'resources', 'knowledge', 'dsa-reference.md')
-  void knowledge.ensureBuiltin('builtin-dsa', 'DSA Reference (built-in)', dsaRef, 1).catch(() => undefined)
+  void knowledge.ensureBuiltin('builtin-dsa', 'DSA Reference (built-in)', dsaRef, 2).catch(() => undefined)
   const orchestrator = new Orchestrator(ollama, indexer, runner, (e: ChatEvent) => send('chat:event', e), () => tree, touched, knowledge)
 
   const openWorkspace = async (dir: string) => {

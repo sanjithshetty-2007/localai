@@ -1,7 +1,7 @@
 {
   "name": "localcode-ai-studio",
   "productName": "LocalCode AI Studio",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Offline, local-first AI assistant and VS Code-style IDE powered by Ollama.",
   "author": "LocalCode AI Studio",
   "license": "MIT",

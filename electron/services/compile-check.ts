@@ -60,6 +60,93 @@ function run(cmd: string, args: string[], cwd: string): Promise<{ ok: boolean; o
   })
 }
 
+const LEETCODE_TREE = 'struct TreeNode { int val; TreeNode *left; TreeNode *right; TreeNode() : val(0), left(nullptr), right(nullptr) {} TreeNode(int x) : val(x), left(nullptr), right(nullptr) {} TreeNode(int x, TreeNode *l, TreeNode *r) : val(x), left(l), right(r) {} };\n'
+const LEETCODE_LIST = 'struct ListNode { int val; ListNode *next; ListNode() : val(0), next(nullptr) {} ListNode(int x) : val(x), next(nullptr) {} ListNode(int x, ListNode *n) : val(x), next(n) {} };\n'
+
+/** C/C++ source with comments removed (strings are rare in these snippets). */
+export function stripCppComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, '')
+}
+
+/**
+ * LeetCode-style answers (a `class Solution`) rely on the judge's environment: all standard
+ * headers plus TreeNode/ListNode definitions that the snippet keeps in a comment. Supply the
+ * same environment for the compile check, so valid LeetCode code is not reported as broken.
+ */
+export function withLeetCodePrelude(src: string): string {
+  const code = stripCppComments(src)
+  if (!/\bclass\s+Solution\b/.test(code)) return src
+  let pre = ''
+  if (!/#\s*include/.test(code)) pre += '#include <bits/stdc++.h>\nusing namespace std;\n'
+  if (/\bTreeNode\b/.test(code) && !/struct\s+TreeNode\s*\{/.test(code)) pre += LEETCODE_TREE
+  if (/\bListNode\b/.test(code) && !/struct\s+ListNode\s*\{/.test(code)) pre += LEETCODE_LIST
+  return pre ? `${pre}${src}` : src
+}
+
+/** Remove a top-level main() by matching braces. */
+export function removeMain(src: string): string {
+  const m = /\bint\s+main\s*\([^)]*\)\s*\{/.exec(src)
+  if (!m) return src
+  let depth = 0
+  for (let i = m.index + m[0].length - 1; i < src.length; i++) {
+    if (src[i] === '{') depth++
+    else if (src[i] === '}' && --depth === 0) return src.slice(0, m.index) + src.slice(i + 1)
+  }
+  return src.slice(0, m.index)
+}
+
+export function hasMain(src: string): boolean {
+  return /\bint\s+main\s*\(/.test(stripCppComments(src))
+}
+
+/** Plain-language description of a failing exit code (Windows NTSTATUS crash codes included). */
+export function describeExit(code: number | null): string {
+  const map: Record<number, string> = {
+    3221225477: 'crashed: invalid memory access (null or dangling pointer, out-of-range index)',
+    3221225725: 'crashed: stack overflow (runaway recursion)',
+    3221226505: 'crashed: aborted (failed assert or uncaught exception)',
+    3221225620: 'crashed: integer division by zero',
+    134: 'crashed: aborted (failed assert)',
+    139: 'crashed: invalid memory access'
+  }
+  return code != null && map[code] ? map[code] : `exited with code ${code}`
+}
+
+export interface RunReport {
+  ran: boolean
+  ok: boolean
+  output: string
+  reason?: string
+}
+
+/**
+ * Compile and run a single C++ solution with a test main() in a private temp folder
+ * (10-second limit). Used only when the user has enabled "Test code by running it".
+ */
+export async function runCppTest(solution: string, testMain: string | null, timeoutMs = 10000): Promise<RunReport> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'localcode-test-'))
+  try {
+    const body = testMain ? `${withLeetCodePrelude(removeMain(solution))}\n#include <cassert>\n${testMain}\n` : withLeetCodePrelude(solution)
+    const src = path.join(dir, 'test.cpp')
+    const exe = path.join(dir, process.platform === 'win32' ? 'test.exe' : 'test')
+    fs.writeFileSync(src, body)
+    const c = await run('g++', ['-std=c++17', '-O1', '-o', exe, src], dir)
+    if (c.missing) return { ran: false, ok: false, output: '', reason: 'g++ not installed' }
+    if (!c.ok) return { ran: true, ok: false, output: c.out.slice(0, 3000), reason: 'test program did not compile' }
+    const r = await new Promise<{ code: number | null; out: string; timedOut: boolean }>((resolve) => {
+      execFile(exe, [], { cwd: dir, timeout: timeoutMs, windowsHide: true, encoding: 'utf8', maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        const e = err as (NodeJS.ErrnoException & { killed?: boolean; code?: number | string }) | null
+        resolve({ code: e ? (typeof e.code === 'number' ? e.code : 1) : 0, out: `${stdout}${stderr}`.slice(-3000), timedOut: !!e?.killed })
+      })
+    })
+    if (r.timedOut) return { ran: true, ok: false, output: r.out, reason: `did not finish within ${timeoutMs / 1000}s (infinite loop?)` }
+    if (r.code !== 0) return { ran: true, ok: false, output: r.out, reason: describeExit(r.code) }
+    return { ran: true, ok: true, output: r.out }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 export interface CompileReport {
   checked: string[] // languages actually compiled
   errors: string // compiler output for failures ('' when clean)
@@ -70,7 +157,7 @@ export async function compileCheck(files: CodeFile[], pythonCmd = process.platfo
   if (!files.length) return report
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'localcode-check-'))
   try {
-    for (const f of files) fs.writeFileSync(path.join(dir, f.name), f.content)
+    for (const f of files) fs.writeFileSync(path.join(dir, f.name), f.lang === 'cpp' ? withLeetCodePrelude(f.content) : f.content)
     const errs: string[] = []
     const byLang = (l: CodeFile['lang']) => files.filter((f) => f.lang === l)
 

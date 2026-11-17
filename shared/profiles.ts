@@ -13,12 +13,15 @@ export interface ProfilePreset {
 export const STUDIO_MODELS: ModelRoles = {
   general: 'qwen3:8b', // conversation
   coder: 'qwen2.5-coder:7b', // code
-  reasoning: 'deepseek-r1:8b', // algorithms, maths, step-by-step
+  reasoning: 'qwen3:8b', // algorithms, maths, step-by-step (thinking mode; finished 2/3 graded DSA problems vs 0/3 for deepseek-r1:8b)
   vision: 'qwen2.5vl:7b', // screenshots and images
   embedding: 'nomic-embed-text' // knowledge library / syllabus retrieval
 }
 
-const STUDIO_SUGGESTED = ['qwen3:8b', 'qwen2.5-coder:7b', 'qwen2.5-coder:14b', 'deepseek-r1:8b', 'qwen2.5vl:7b', 'nomic-embed-text']
+const STUDIO_SUGGESTED = ['qwen3:8b', 'qwen2.5-coder:7b', 'qwen2.5-coder:14b', 'qwen3:30b-a3b-thinking-2507-q4_K_M', 'deepseek-r1:8b', 'qwen2.5vl:7b', 'nomic-embed-text']
+
+/** MoE reasoning model: 30B parameters, ~3B active per token, so it stays usable when split between GPU and RAM. */
+export const REASONING_30B = 'qwen3:30b-a3b-thinking-2507-q4_K_M'
 
 /** Approximate download sizes (GB) shown in the setup wizard. */
 export const MODEL_SIZES_GB: Record<string, number> = {
@@ -30,11 +33,13 @@ export const MODEL_SIZES_GB: Record<string, number> = {
   'deepseek-r1:14b': 9.0,
   'qwen2.5vl:7b': 6.0,
   'qwen2.5vl:3b': 3.2,
-  'nomic-embed-text': 0.27
+  'nomic-embed-text': 0.27,
+  'qwen3:30b-a3b-thinking-2507-q4_K_M': 18.6,
+  'gpt-oss:20b': 13.8
 }
 
 /** Bump when presets change so saved settings are migrated once. */
-export const PRESET_VERSION = 3
+export const PRESET_VERSION = 4
 
 export const PROFILE_PRESETS: Record<HardwareProfile, ProfilePreset> = {
   lite: {
@@ -53,7 +58,7 @@ export const PROFILE_PRESETS: Record<HardwareProfile, ProfilePreset> = {
     numCtx: 8192,
     temperature: 0.4,
     // Code quality matters most for exams: the 14B coder runs ~57% on the GPU and the rest in system RAM.
-    roles: { ...STUDIO_MODELS, coder: 'qwen2.5-coder:14b' },
+    roles: { ...STUDIO_MODELS, coder: 'qwen2.5-coder:14b', reasoning: REASONING_30B },
     suggested: STUDIO_SUGGESTED
   },
   deep: {
@@ -64,10 +69,20 @@ export const PROFILE_PRESETS: Record<HardwareProfile, ProfilePreset> = {
     roles: {
       general: 'qwen3:14b',
       coder: 'qwen2.5-coder:14b',
-      reasoning: 'deepseek-r1:14b',
+      reasoning: REASONING_30B,
       vision: 'qwen2.5vl:7b',
       embedding: 'nomic-embed-text'
     },
-    suggested: ['qwen3:14b', 'qwen2.5-coder:14b', 'deepseek-r1:14b', 'qwen2.5vl:7b', 'nomic-embed-text']
+    suggested: ['qwen3:14b', 'qwen2.5-coder:14b', REASONING_30B, 'qwen2.5vl:7b', 'nomic-embed-text']
   }
+}
+
+/**
+ * The 30B MoE reasoning model needs ~20 GB of RAM+VRAM (weights mostly in system RAM), so it is only
+ * used on machines with at least 30 GB of RAM; smaller machines use qwen3:8b for reasoning instead.
+ */
+export const MIN_RAM_GB_FOR_30B = 30
+export function adjustRolesForMemory(roles: ModelRoles, totalRamGB: number): ModelRoles {
+  if (roles.reasoning === REASONING_30B && totalRamGB < MIN_RAM_GB_FOR_30B) return { ...roles, reasoning: 'qwen3:8b' }
+  return roles
 }

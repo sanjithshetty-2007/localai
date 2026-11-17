@@ -70,6 +70,25 @@ Unit tests: 35/35 (new: heading and comment file-name formats, `#include` not mi
 | Pane crash isolation | ✅ error boundaries per pane (found when a welcome-screen typo blanked the app during testing) |
 | Unit tests | ✅ 36/36 |
 
+## 1.0.5: CUDA crash fix, qwen3:30b-a3b-thinking, DSA accuracy suite (2026-11-17)
+
+**Crash** (`llama-server … 0xc0000409 … CUDA error: shared object initialization failed`): Ollama's log showed it happened while loading the partially GPU-offloaded qwen2.5-coder:14b, inside the flash-attention kernel, with VRAM nearly full. It was intermittent (the same loads at 8K/10K/12K context succeeded in isolation). Fix: wait until the previous model has left VRAM before loading the next, and on a runner crash retry with fewer GPU layers (60%, then 35%). Unit test covers the exact error text.
+
+**qwen3:30b-a3b-thinking-2507** (MoE, ~3B active): 46 tok/s on RTX 5070 Laptop (31% on GPU, ~13.5 GB in RAM), about 20 GB in total. Used for reasoning only on machines with 30 GB+ RAM; below that, qwen3:8b.
+
+**DSA suite** (15 problems through the full app, graded objectively; graders validated on reference and wrong answers):
+
+| Run | Result | Notes |
+|---|---|---|
+| 1 | 15/15 | after fixing two grader bugs that had marked correct answers wrong |
+| 2 | 14/15 | AVL: genuine model mistake (rotated at 20 instead of the lowest unbalanced node 30). Built-in reference clarified (lowest unbalanced ancestor + a verified worked example on different keys); AVL then 3/3 |
+| 3 | 12/15 | LeetCode 25: genuine logic bug (infinite loop); postfix: genuine slip in the final answer; AVL: correct, grader couldn't read a table (fixed) |
+| Model self-review | rejected | caught neither real error and called the wrong postfix "correct" |
+| 4 (with verification) | **15/15** | independent re-solve + majority corrected a wrong first postfix answer; 0 network requests from the app window |
+| LeetCode re-run after the code-test redesign | 6/6 (stopped early by the user) | no false corrections or warnings; the opt-in code test often skipped (generated tests didn't compile) |
+
+Verification features: **Double-check reasoning answers** (on by default; independent re-solve, majority of 3 on disagreement) and **Test code by running it** (opt-in; a corrected solution is shown only if it passes the tests the original failed). The first two LeetCode re-run answers in run 4 exposed false alarms from buggy generated tests, and that was fixed before release.
+
 ## Re-running
 
 ```bash

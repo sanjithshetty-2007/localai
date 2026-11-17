@@ -73,7 +73,7 @@ The assistant picks one of these internal models for each request:
 |---|---|---|
 | Conversation | `qwen3:8b` | General questions, explanations, documents (thinking mode off for speed) |
 | Code | `qwen2.5-coder:14b` on Balanced (split GPU + RAM, ~14 tok/s) · `qwen2.5-coder:7b` on Lite | Writing and editing files, debugging, fixing errors, repository questions. Every C/C++/Java/Python answer is compile-checked (never run) and repaired automatically, up to two rounds. |
-| Reasoning | `deepseek-r1:8b` | Algorithms, maths, OS/scheduling problems, step-by-step work (its reasoning appears under "Reasoning" in the chat). Prompted the way DeepSeek recommends for R1 (no system prompt, temperature 0.6, top_p 0.95), with a context window sized so the question is never pushed out. **Settings → Generation → Reasoning depth** sets how long it may think: 8K, 16K or 24K tokens. This R1-0528 distill often deliberates past any budget; when it runs out, or a loop detector sees sustained repetition (≥50%), the coding or conversation model writes the final answer from its reasoning, and code is compile-checked. |
+| Reasoning | `qwen3:30b-a3b-thinking-2507` on Balanced with 30 GB+ RAM, otherwise `qwen3:8b` (thinking mode) | Algorithms, maths, DSA exam questions (traversals, AVL rotations, hashing, page replacement…), step-by-step work. The 30B is a mixture-of-experts model (~3B active per token): about 20 GB in RAM+VRAM, and it ran at ~46 tok/s on an RTX 5070 Laptop with 32 GB RAM. On machines under 30 GB RAM the app uses qwen3:8b automatically. **Settings → Generation → Reasoning depth** sets the thinking budget (8K/16K/24K tokens). If a model hasn't answered when the budget runs out, or a loop detector sees sustained repetition, the coding or conversation model writes the final answer from its reasoning, and code is compile-checked. deepseek-r1:8b stays selectable but overthinks (0/3 graded problems finished vs 2/3 for qwen3:8b in our test). |
 | Vision | `qwen2.5vl:7b` | Screenshots and images. It reads the image, then the conversation or code model writes the answer. |
 | Embeddings | `nomic-embed-text` | Semantic search over your knowledge library (syllabus, notes) |
 
@@ -126,6 +126,15 @@ node scripts/e2e.mjs attachments <workspaceDir>  # PDF + ZIP processing, diff/ac
 node scripts/e2e.mjs ai <workspaceDir>           # real Ollama tests (needs a model)
 ```
 
+**DSA / LeetCode accuracy suite** (`scripts/dsa-suite`): 15 problems run through the full app pipeline and graded objectively. The 9 LeetCode solutions (863, 102, 236, 207, 743, 84, 239, 150, 25) are compiled with g++ and run against hidden tests; the 6 exam questions (FIFO page faults, AVL rotations, infix→postfix, postfix evaluation, BFS/DFS order, linear-probing hashing) are checked for exact answers. Validate the graders first: reference answers must pass and wrong answers must fail.
+
+```bash
+node scripts/dsa-suite/self-test.mjs
+```
+```bash
+node scripts/e2e.mjs dsa-suite
+```
+
 Set `E2E_OUT` to choose where screenshots go. The `attachments` and `ai` scenarios expect `assignment.pdf` (from `node scripts/make-test-pdf.mjs`) and `project.zip` in that folder.
 
 ---
@@ -138,6 +147,9 @@ Set `E2E_OUT` to choose where screenshots go. The `attachments` and `ai` scenari
 - **Chat** in the right sidebar. Attach PNG/JPG/WEBP, PDF, text/code files or ZIP with the paperclip, by drag-and-drop, or paste images with Ctrl+V. The assistant automatically sees the active file, your selection, open tabs, the last run's errors, terminal output, relevant indexed project files, attachments, earlier messages and project memory.
 - **Knowledge library** (book icon in the activity bar): add your syllabus, course outline, notes or reference PDFs (PDF, DOCX, TXT, MD), or drop them on the panel. Each document is split into passages and embedded locally with `nomic-embed-text`. For every request the assistant runs a hybrid search (semantic plus keyword, plus whole "Unit III" / "Module 2" / "Question 4" sections when you name one) and adds the matching passages as a *Reference library* block. It follows your syllabus's topics and terms and cites sources like `[syllabus.pdf p.3]`. Unrelated requests (for example "write a function that adds two numbers") don't pull the library in. The library is shared by all conversations; you can switch individual documents on or off, test retrieval in the panel, and turn it all off in Settings. If the embedding model is missing, the library falls back to keyword search.
 - **Built-in DSA reference**: the library ships with a reference covering trees (binary, BST, expression, threaded, AVL, heap, B-tree, trie, Huffman), graphs (BFS, DFS, topological sort, Dijkstra, Bellman–Ford, Floyd–Warshall, Prim, Kruskal), stacks (infix→postfix, evaluation, parentheses), queues (linear, circular, deque, two-stack), linked lists, hashing and sorting. When you name a structure, its exact definition and required operations go to the model, so an "expression tree" can't come back as a BST.
+- **Answer verification** (Settings → Generation):
+  - **Double-check reasoning answers** (on by default): the reasoning model solves the question a second time *without seeing the first answer*, and the app compares the final results. If they differ, a third independent attempt decides by majority, and the answer is corrected or flagged. In testing this caught and fixed a wrong infix→postfix answer. It makes hard questions about twice as slow.
+  - **Test code by running it** (off by default, because it runs AI-written code on your computer): after a C++ solution is written, the coding model writes tests from the problem's examples and edge cases. The app compiles and runs them in a temporary folder with a 10-second limit. When a test fails, the app works out whether the test or the solution is wrong, and only shows a corrected solution if it passes the tests the original failed.
 - **Review AI changes**: file proposals appear as a *Proposed changes* card with +/− counts. **Review** opens a red/green diff tab. You can accept or reject each file or all at once, and **Undo** afterwards. Deletes, renames and commands always ask first. Commands must be on an allowlist and can't use shell operators.
 - **Self-healing**: when a run fails, click **Fix Error with AI**, then **Accept & Re-run**. The card shows *Verified* or *Still failing*. After three failed attempts it asks you to review the code yourself instead of looping.
 

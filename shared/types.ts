@@ -44,6 +44,8 @@ export interface Settings {
   setupDone: boolean
   autoUpdate: boolean
   reasoningBudget: number
+  doubleCheck: boolean
+  testCode: boolean
 }
 
 export interface GpuInfo {

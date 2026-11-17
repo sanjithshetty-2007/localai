@@ -19,12 +19,22 @@ export interface ChatOptions {
   signal?: AbortSignal
   onToken?: (text: string) => void
   onThinking?: (text: string) => void
+  onRetry?: (message: string) => void
 }
 
 export class OllamaError extends Error {
-  constructor(message: string, readonly status?: number) {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly raw: string = message
+  ) {
     super(message)
   }
+}
+
+/** Ollama's model runner died (CUDA error / process exit) — usually a transient VRAM problem. */
+export function isRunnerCrash(msg: string): boolean {
+  return /llama-server process has terminated|runner process has terminated|CUDA error|exit status 0xc0000409|0xc0000005|cudaMalloc failed|unable to allocate CUDA/i.test(msg)
 }
 
 /** Thin client for the local Ollama REST API. No other inference backend is used. */
@@ -161,8 +171,56 @@ export class OllamaClient {
     onProgress({ model, status: 'success', done: true })
   }
 
-  /** Streaming chat. Resolves with the full assistant content once the stream finishes. */
+  /** Number of transformer layers (for choosing how many to keep on the GPU). */
+  private async layerCount(model: string): Promise<number | null> {
+    try {
+      const r = await this.json<{ model_info?: Record<string, unknown> }>('/api/show', { method: 'POST', body: JSON.stringify({ model }) })
+      const key = Object.keys(r.model_info ?? {}).find((k) => k.endsWith('.block_count'))
+      const n = key ? Number(r.model_info![key]) : NaN
+      return Number.isFinite(n) && n > 0 ? n : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Streaming chat. If Ollama's GPU runner crashes while loading the model (a CUDA error when
+   * VRAM is nearly full, seen on RTX 50-series with partially offloaded models), wait for the
+   * GPU to settle and retry with fewer layers on the GPU — but only if nothing was streamed yet.
+   */
   async chat(opts: ChatOptions): Promise<{ content: string; thinking: string; evalCount?: number }> {
+    let streamed = false
+    const wrapped: ChatOptions = {
+      ...opts,
+      onToken: (t) => {
+        streamed = true
+        opts.onToken?.(t)
+      },
+      onThinking: (t) => {
+        streamed = true
+        opts.onThinking?.(t)
+      }
+    }
+    const fractions = [0.6, 0.35]
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.chatOnce(wrapped)
+      } catch (e) {
+        const raw = e instanceof OllamaError ? e.raw : ''
+        if (streamed || opts.signal?.aborted || !isRunnerCrash(raw) || attempt >= fractions.length) {
+          if (isRunnerCrash(raw)) throw new OllamaError(`Ollama's GPU runner crashed while loading ${opts.model} (${raw.slice(0, 120)}). The app retried with fewer GPU layers. Close other GPU-heavy programs, choose a smaller model in Settings → Models, or switch to the Lite profile.`)
+          throw e
+        }
+        await new Promise((r) => setTimeout(r, 4000))
+        const layers = await this.layerCount(opts.model)
+        const num_gpu = layers ? Math.max(1, Math.floor(layers * fractions[attempt])) : undefined
+        wrapped.options = { ...(opts.options ?? {}), ...(num_gpu ? { num_gpu } : {}) }
+        opts.onRetry?.(`GPU memory was tight — reloading ${opts.model} with ${num_gpu ?? 'fewer'} layers on the GPU…`)
+      }
+    }
+  }
+
+  private async chatOnce(opts: ChatOptions): Promise<{ content: string; thinking: string; evalCount?: number }> {
     const body: Record<string, unknown> = {
       model: opts.model,
       messages: opts.messages,
@@ -194,7 +252,7 @@ export class OllamaClient {
       if (opts.think !== undefined && /think/i.test(msg)) {
         return this.chat({ ...opts, think: undefined })
       }
-      throw new OllamaError(friendlyOllamaError(msg || `HTTP ${res.status}`, opts.model), res.status)
+      throw new OllamaError(friendlyOllamaError(msg || `HTTP ${res.status}`, opts.model), res.status, msg)
     }
     let content = ''
     let thinking = ''
@@ -206,7 +264,7 @@ export class OllamaClient {
         done?: boolean
         eval_count?: number
       }
-      if (o.error) throw new OllamaError(friendlyOllamaError(o.error, opts.model))
+      if (o.error) throw new OllamaError(friendlyOllamaError(o.error, opts.model), undefined, o.error)
       const t = o.message?.thinking
       if (t) {
         thinking += t

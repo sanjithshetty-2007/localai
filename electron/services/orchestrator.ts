@@ -12,7 +12,7 @@ import { applyChangeSet, buildChangeSet, parseActions } from './file-actions'
 import type { CodeRunner } from '../terminal/runner'
 import { getWorkspaceRoot, resolveInWorkspace, toRelative } from '../security/paths'
 import { searchWorkspace } from '../filesystem/fs-service'
-import { collectCodeFiles, compileCheck } from './compile-check'
+import { collectCodeFiles, compileCheck, hasMain, removeMain, runCppTest } from './compile-check'
 import { RepetitionMonitor } from './text-utils'
 import * as memory from './memory'
 
@@ -24,7 +24,22 @@ function estimateTokens(messages: OllamaChatMessage[]): number {
 }
 
 const REASONING_GUIDE =
-  '\n\nThink it through carefully. Once you have an approach and have checked it (including edge cases), stop deliberating and give the final answer: the approach in clear steps, time and space complexity, and complete, working code when code is requested.'
+  '\n\nThink it through carefully. Once you have an approach and have checked it (including edge cases), stop deliberating and give the final answer: the approach in clear steps, time and space complexity, and complete, working code when code is requested. End with one line in the form `FINAL ANSWER: <the result>`.'
+
+/** The text after the last "FINAL ANSWER:" line, if any. */
+function finalAnswerOf(text: string): string | null {
+  const m = [...text.matchAll(/FINAL ANSWER\s*[:：]\s*([^\n]+)/gi)].at(-1)
+  return m ? m[1].trim() : null
+}
+
+/** Compare final answers ignoring formatting: case, spaces, markdown, punctuation between items. */
+export function normalizeFinal(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\\boxed\{([^}]*)\}/g, '$1')
+    .replace(/[\s,*_`$\\→]+/g, '')
+    .replace(/\.$/, '')
+}
 
 /**
  * DeepSeek recommends no system prompt for R1 models: fold system instructions into the
@@ -50,6 +65,7 @@ export function isFollowUp(text: string): boolean {
 const EMBED_RE = /embed|bge|nomic|minilm|e5-/i
 // Thinking models (deepseek-r1, qwen3) get a bounded reasoning budget (~1.5 min on an 8 GB GPU).
 const ANSWER_TOKENS = 2560 // room for the final answer after thinking
+const FINISH_THINK_TOKENS = 3072 // extra thinking allowed when finishing from the model's own notes
 const MAX_REASONING_CTX = 32768
 // Questions whose answer should include code (finished by the coding model if reasoning runs out).
 const CODE_ANSWER_RE = /\b(code|program|implement|function|solution|leetcode|c\+\+|cpp|java|python|javascript|write)\b/i
@@ -106,6 +122,7 @@ export class Orchestrator {
 
   private async ensureResident(model: string, settings: Settings, status: (t: string) => void): Promise<void> {
     if (!settings.singleModelResidency) return
+    let unloaded = false
     try {
       const running = await this.ollama.ps()
       for (const r of running) {
@@ -113,7 +130,18 @@ export class Orchestrator {
         if (r.name !== model && !EMBED_RE.test(r.name) && r.name.split(':')[0] !== settings.roles.embedding.split(':')[0]) {
           status(`Unloading ${r.name} to free memory…`)
           await this.ollama.unload(r.name).catch(() => undefined)
+          unloaded = true
         }
+      }
+      // Wait until Ollama has really released the GPU memory before the next model loads;
+      // loading into still-occupied VRAM can crash the CUDA runner (seen on RTX 50-series).
+      if (unloaded) {
+        for (let i = 0; i < 20; i++) {
+          const now = await this.ollama.ps().catch(() => [])
+          if (!now.some((r) => r.name !== model && !EMBED_RE.test(r.name) && r.name.split(':')[0] !== settings.roles.embedding.split(':')[0])) break
+          await new Promise((res) => setTimeout(res, 500))
+        }
+        await new Promise((res) => setTimeout(res, 1500))
       }
       if (!running.some((r) => r.name === model)) status(`Loading ${model}…`)
     } catch {
@@ -121,8 +149,115 @@ export class Orchestrator {
     }
   }
 
-  async send(req: ChatRequest): Promise<void> {
-    if (this.active.has(req.conversationId)) throw new Error('The assistant is already answering in this conversation.')
+  /**
+   * Opt-in "Test code by running it": the coding model writes a test main() (examples from the
+   * problem plus edge cases, asserts only for certain results), the solution is compiled and run
+   * in a temp folder with a 10 s limit, and a crash, hang or failed assert goes back to the coding
+   * model for one repair, which is tested again.
+   */
+  private async testAndRepairCode(
+    req: ChatRequest,
+    content: string,
+    settings: Settings,
+    installed: OllamaModel[],
+    status: (t: string) => void,
+    onRetry: (t: string) => void,
+    meta: MessageMeta,
+    ev: { conversationId: string; messageId: string },
+    append: (text: string) => void
+  ): Promise<void> {
+    void ev
+    const coder = this.pick('coder', settings, installed)
+    const cpp = collectCodeFiles(content).filter((f) => f.lang === 'cpp' && !/\.(h|hpp)$/.test(f.name))
+    if (!coder || cpp.length !== 1) {
+      if (cpp.length > 1) meta.steps!.push('Code test skipped (program has several files)')
+      return
+    }
+    await this.ensureResident(coder, settings, status)
+    let solution = cpp[0].content
+    const isLeetCode = /\bclass\s+Solution\b/.test(solution)
+    let testMain: string | null = null
+    if (isLeetCode || !hasMain(solution)) {
+      status('Writing tests for the solution…')
+      const res = await this.ollama.chat({
+        model: coder,
+        messages: [
+          {
+            role: 'user',
+            content: `Problem:\n${req.text}\n\nSolution:\n\`\`\`cpp\n${removeMain(solution)}\n\`\`\`\n\nWrite ONLY a C++ int main() that tests this solution: call it on the examples from the problem and on edge cases (empty input, single element, boundary values). Use assert() only for expected results you are completely sure of. The solution and any TreeNode/ListNode structs are already defined above your code, so do not redefine them; build trees/lists yourself. Print ALL TESTS PASSED at the end. Reply with one \`\`\`cpp block.`
+          }
+        ],
+        options: { num_ctx: settings.numCtx, temperature: 0.2, top_p: settings.topP, num_predict: 2048 },
+        keepAlive: settings.keepAlive,
+        onRetry
+      }).catch(() => null)
+      const block = res ? [...res.content.matchAll(/```(?:cpp|c\+\+)?[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]).find((b) => /\bint\s+main\s*\(/.test(b)) : undefined
+      const m = block ? /\bint\s+main\s*\([^)]*\)\s*\{[\s\S]*$/.exec(block) : null
+      if (!m) {
+        meta.steps!.push('Code test skipped (could not write a test)')
+        return
+      }
+      testMain = m[0]
+    }
+    const codeBlock = (text: string | undefined, want: (b: string) => boolean) =>
+      text ? [...text.matchAll(/```(?:cpp|c\+\+)?[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]).filter(want).at(-1) : undefined
+    const mainOf = (b: string | undefined) => (b ? /\bint\s+main\s*\([^)]*\)\s*\{[\s\S]*$/.exec(b)?.[0] ?? null : null)
+    const ask = (content: string, num_predict = 3072) =>
+      this.ollama
+        .chat({ model: coder, messages: [{ role: 'user', content }], options: { num_ctx: settings.numCtx, temperature: 0.2, top_p: settings.topP, num_predict }, keepAlive: settings.keepAlive, onRetry })
+        .then((r) => r.content)
+        .catch(() => undefined)
+
+    status('Running the solution on test cases…')
+    let rep = await runCppTest(solution, testMain)
+    if (!rep.ran) {
+      meta.steps!.push(`Code test skipped (${rep.reason})`)
+      return
+    }
+    // A test that does not compile is the test's fault: let the coding model fix the test once.
+    if (rep.reason === 'test program did not compile' && testMain) {
+      const fixedTest = mainOf(codeBlock(await ask(`This C++ test main() does not compile against the solution below.\n\nSolution:\n\`\`\`cpp\n${removeMain(solution)}\n\`\`\`\n\nTest:\n\`\`\`cpp\n${testMain}\n\`\`\`\n\nCompiler errors:\n${rep.output.slice(0, 2000)}\n\nReturn ONLY the corrected int main() in one \`\`\`cpp block. Do not change or redefine the solution.`, 2048), (b) => /\bint\s+main\s*\(/.test(b)))
+      if (fixedTest) {
+        testMain = fixedTest
+        rep = await runCppTest(solution, testMain)
+      }
+      if (rep.reason === 'test program did not compile') {
+        meta.steps!.push('Code test skipped (could not build a compiling test)')
+        return
+      }
+    }
+    if (rep.ok) {
+      meta.steps!.push('Code tested: examples and edge cases passed')
+      return
+    }
+    // A failure may be the test's fault or the solution's. Only a corrected solution that passes
+    // the same tests the original failed is ever shown to the user.
+    status('A test failed — finding out whether the test or the solution is wrong…')
+    const verdict = await ask(
+      `Problem:\n${req.text}\n\nSolution:\n\`\`\`cpp\n${solution}\n\`\`\`\n\nTest:\n\`\`\`cpp\n${testMain ?? "(the solution's own main)"}\n\`\`\`\n\nRunning it ${rep.reason}. Output:\n${rep.output.slice(-1500)}\n\nDecide carefully whether the TEST is wrong (bad tree/list construction, wrong expected value, out-of-range access in the test) or the SOLUTION is wrong.\nIf the test is wrong reply: CULPRIT: TEST, then the corrected int main() in one \`\`\`cpp block.\nIf the solution is wrong reply: CULPRIT: SOLUTION, one sentence naming the bug, then the complete corrected solution in one \`\`\`cpp block with the same signature.`
+    )
+    const culprit = /CULPRIT:\s*(TEST|SOLUTION)/i.exec(verdict ?? '')?.[1]?.toUpperCase()
+    if (culprit === 'TEST' && testMain) {
+      const newTest = mainOf(codeBlock(verdict, (b) => /\bint\s+main\s*\(/.test(b)))
+      const again = newTest ? await runCppTest(solution, newTest) : null
+      meta.steps!.push(again?.ok ? 'Code tested: examples and edge cases passed (after correcting the test)' : `Code test inconclusive (${rep.reason}; the test itself looked wrong)`)
+      return
+    }
+    if (culprit === 'SOLUTION') {
+      const fixed = codeBlock(verdict, (b) => b.includes('Solution') || hasMain(b))
+      if (fixed) {
+        const check = await runCppTest(fixed, testMain)
+        if (check.ok) {
+          const why = (verdict ?? '').slice((verdict ?? '').search(/CULPRIT:/i)).split('\n').slice(1).find((l) => l.trim() && !l.startsWith('```'))?.trim()
+          append(`\n\n---\n**Testing found a bug${why ? ` (${why.replace(/\*/g, '').slice(0, 200)})` : ''} — corrected solution (passes the tests the original failed):**\n\n\`\`\`cpp\n${fixed.trim()}\n\`\`\``)
+          meta.steps!.push(`Code test failed (${rep.reason}); corrected solution passes the tests`)
+          return
+        }
+      }
+    }
+    meta.steps!.push(`Code test inconclusive (${rep.reason}); answer left unchanged`)
+  }
+  async send(req: ChatRequest): Promise<void> {    if (this.active.has(req.conversationId)) throw new Error('The assistant is already answering in this conversation.')
     const settings = getSettings()
     this.ollama.setBaseUrl(settings.ollamaUrl)
     const conv = memory.getConversation(req.conversationId)
@@ -166,6 +301,10 @@ export class Orchestrator {
     const ev = { conversationId: req.conversationId, messageId }
     this.emit({ type: 'start', ...ev, userMessage: req.regenerate ? undefined : userMessage })
     const status = (text: string) => this.emit({ type: 'status', ...ev, text })
+    const onRetry = (text: string) => {
+      status(text)
+      meta.steps?.push(text)
+    }
 
     let content = ''
     let thinking = ''
@@ -292,6 +431,10 @@ export class Orchestrator {
       if (!meta.models!.includes(mainModel)) meta.models!.push(mainModel)
       const think = route === 'reasoning' && mainCaps.includes('thinking') ? true : mainCaps.includes('thinking') ? false : undefined
       let toolResults = ''
+      // Thinking budget from Settings → Reasoning depth.
+      const REASONING_BUDGET = Math.min(24576, Math.max(4096, settings.reasoningBudget || 12288))
+      let reasoningMessages: OllamaChatMessage[] | null = null
+      let reasoningCtx = settings.numCtx
       const maxSteps = Math.max(1, Math.min(8, settings.maxAgentSteps))
       for (let step = 0; step < maxSteps; step++) {
         const built = buildContext({
@@ -313,13 +456,16 @@ export class Orchestrator {
         // Thinking models follow DeepSeek's guidance for R1: no system prompt (everything goes in the
         // user turn), temperature 0.6, top_p 0.95 — and a context window large enough for the prompt
         // plus the whole thinking budget plus the answer, so the question is never pushed out.
-        // Thinking budget from Settings → Reasoning depth (never below the 8K standard default's floor of 4K).
-        const REASONING_TOKEN_CAP = Math.min(24576, Math.max(4096, settings.reasoningBudget || 8192))
+        const REASONING_TOKEN_CAP = REASONING_BUDGET
         const messages: OllamaChatMessage[] = think ? toReasoningMessages(built.messages) : built.messages
         const promptTokens = estimateTokens(messages)
         const numCtx = think
           ? Math.min(MAX_REASONING_CTX, Math.max(settings.numCtx, Math.ceil((promptTokens + REASONING_TOKEN_CAP + ANSWER_TOKENS) / 1024) * 1024))
           : settings.numCtx
+        if (think && step === 0) {
+          reasoningMessages = messages
+          reasoningCtx = numCtx
+        }
         if (think && step === 0) meta.steps!.push(`Reasoning: context ${numCtx} tokens (prompt ≈${promptTokens} + thinking budget ${REASONING_TOKEN_CAP} + answer ${ANSWER_TOKENS})`)
         status(step === 0 ? `Thinking with ${mainModel}…` : `Continuing with ${mainModel}…`)
         let stepText = ''
@@ -348,6 +494,7 @@ export class Orchestrator {
             messages,
             options: { num_ctx: numCtx, temperature, top_p: topP, num_predict: numPredict },
             keepAlive: settings.keepAlive,
+            onRetry,
             think,
             signal: stepCtrl.signal,
             onToken,
@@ -368,9 +515,55 @@ export class Orchestrator {
         } finally {
           ctrl.signal.removeEventListener('abort', relayAbort)
         }
-        if (think && (thinkStop || !r.content.trim())) {
-          // The reasoning ended without an answer (budget reached or a loop): a second model writes
-          // the final answer from the reasoning — the coding model when code is asked for.
+        if (think && (thinkStop || !r.content.trim()) && !ctrl.signal.aborted) {
+          // 1) Let the same reasoning model finish from its own notes with a short extra thinking
+          //    budget (it often only needs to verify and conclude — handing over to a weaker model
+          //    at this point threw away a self-correction in testing).
+          status(`Finishing the answer with ${mainModel}…`)
+          const notes = thinking.slice(-14000)
+          const finishMsgs: OllamaChatMessage[] = [
+            {
+              role: 'user',
+              content: `${req.text}\n\nYour reasoning so far (it may be unfinished):\n${notes}\n\nMost of the work is done. Check the key steps once (correct any mistake you find), then give the final answer${CODE_ANSWER_RE.test(req.text) ? ' with complete, working code' : ''}. Do not start over.`
+            }
+          ]
+          const finCtrl = new AbortController()
+          const relayFin = () => finCtrl.abort()
+          ctrl.signal.addEventListener('abort', relayFin)
+          let finThink = 0
+          let finText = ''
+          try {
+            const fin = await this.ollama.chat({
+              model: mainModel,
+              messages: finishMsgs,
+              options: { num_ctx: Math.min(MAX_REASONING_CTX, Math.ceil((estimateTokens(finishMsgs) + FINISH_THINK_TOKENS + ANSWER_TOKENS) / 1024) * 1024), temperature, top_p: topP, num_predict: FINISH_THINK_TOKENS + ANSWER_TOKENS },
+              keepAlive: settings.keepAlive,
+              onRetry,
+              think,
+              signal: finCtrl.signal,
+              onToken: (t) => {
+                finText += t
+                onToken(t)
+              },
+              onThinking: (t) => {
+                thinking += t
+                this.emit({ type: 'thinking', ...ev, text: t })
+                if (++finThink > FINISH_THINK_TOKENS) finCtrl.abort()
+              }
+            })
+            if (fin.content.trim()) {
+              r = fin
+              meta.steps!.push(`Reasoning ${(thinkStop as string | null) === 'loop' ? 'started repeating itself' : `used its full ${REASONING_TOKEN_CAP}-token budget`}; ${mainModel} then finished from its own notes`)
+            }
+          } catch (e) {
+            if (ctrl.signal.aborted) throw e
+          } finally {
+            ctrl.signal.removeEventListener('abort', relayFin)
+          }
+        }
+        if (think && !r.content.trim() && !ctrl.signal.aborted) {
+          // 2) Still no answer: a second model writes the final answer from the reasoning — the
+          //    coding model when code is asked for.
           const wantsCode = CODE_ANSWER_RE.test(req.text)
           const writer = (wantsCode ? this.pick('coder', settings, installed) : this.pick('general', settings, installed)) ?? mainModel
           meta.steps!.push(
@@ -396,6 +589,7 @@ export class Orchestrator {
             ],
             options: { num_ctx: Math.max(settings.numCtx, Math.ceil((estimateTokens([{ role: 'user', content: draft + req.text }]) + 3072) / 1024) * 1024), temperature: 0.3, top_p: settings.topP, num_predict: 3072 },
             keepAlive: settings.keepAlive,
+            onRetry,
             think: writerCaps.includes('thinking') ? false : undefined,
             signal: ctrl.signal,
             onToken
@@ -437,7 +631,7 @@ export class Orchestrator {
       }
 
       // ---- Compile check: verify generated C/C++/Java/Python and let the model repair errors ----
-      if ((route === 'code' || route === 'debug' || route === 'document' || route === 'reasoning') && !ctrl.signal.aborted) {
+      const compileCheckContent = async (): Promise<void> => {
         // Repairs use the coding model on the reasoning route (no second long deliberation).
         const repairModel = route === 'reasoning' ? (this.pick('coder', settings, installed) ?? mainModel) : mainModel
         const repairCaps = installed.find((m) => m.name === repairModel)?.capabilities ?? []
@@ -477,6 +671,7 @@ export class Orchestrator {
             ],
             options: { num_ctx: settings.numCtx, temperature: 0.2, top_p: settings.topP, num_predict: Math.max(1024, Math.floor(settings.numCtx * 0.6)) },
             keepAlive: settings.keepAlive,
+            onRetry,
             think: repairCaps.includes('thinking') ? false : undefined,
             signal: ctrl.signal,
             onToken: (t) => this.emit({ type: 'token', ...ev, text: t })
@@ -487,7 +682,80 @@ export class Orchestrator {
           files = named ? [...updated.values()] : collectCodeFiles(fix.content)
         }
       }
+      if ((route === 'code' || route === 'debug' || route === 'document' || route === 'reasoning') && !ctrl.signal.aborted) await compileCheckContent()
 
+      // ---- Verification (1): run the code on examples and edge cases (opt-in) ----
+      const codeNow = collectCodeFiles(content)
+      if (settings.testCode && !ctrl.signal.aborted && (route === 'code' || route === 'debug') && codeNow.some((f) => f.lang === 'cpp')) {
+        await this.testAndRepairCode(req, content, settings, installed, status, onRetry, meta, ev, (extra) => {
+          content += extra
+          this.emit({ type: 'token', ...ev, text: extra })
+        })
+      }
+
+      // ---- Verification (2): independent second solution for reasoning answers ----
+      // The model solves the question again without seeing the first answer; if the final results
+      // differ, a third independent attempt decides by majority.
+      if (settings.doubleCheck && !ctrl.signal.aborted && think && route === 'reasoning' && reasoningMessages && content.trim()) {
+        const solve = async (label: string): Promise<string | null> => {
+          status(`Double-checking: ${label}…`)
+          const sCtrl = new AbortController()
+          const relayS = () => sCtrl.abort()
+          ctrl.signal.addEventListener('abort', relayS)
+          let n = 0
+          try {
+            const res = await this.ollama.chat({
+              model: mainModel,
+              messages: reasoningMessages!,
+              options: { num_ctx: reasoningCtx, temperature: 0.6, top_p: 0.95, num_predict: REASONING_BUDGET + ANSWER_TOKENS },
+              keepAlive: settings.keepAlive,
+              onRetry,
+              think: true,
+              signal: sCtrl.signal,
+              onThinking: () => {
+                if (++n > REASONING_BUDGET) sCtrl.abort()
+              }
+            })
+            return res.content.trim() ? res.content : null
+          } catch (e) {
+            if (ctrl.signal.aborted) throw e
+            return null
+          } finally {
+            ctrl.signal.removeEventListener('abort', relayS)
+          }
+        }
+        const same = async (x: string, y: string): Promise<boolean> => {
+          const fx = finalAnswerOf(x)
+          const fy = finalAnswerOf(y)
+          if (fx && fy && normalizeFinal(fx) === normalizeFinal(fy)) return true
+          const q = `Question:\n${req.text}\n\nResult A:\n${fx ?? x.slice(-2500)}\n\nResult B:\n${fy ?? y.slice(-2500)}\n\nDo A and B give the same final result (ignore wording and formatting)? Reply exactly SAME or DIFFERENT.`
+          const res = await this.ollama.chat({ model: mainModel, messages: [{ role: 'user', content: q }], options: { num_ctx: 8192, temperature: 0.2, top_p: 0.95, num_predict: 3072 }, keepAlive: settings.keepAlive, onRetry, think: true, signal: ctrl.signal }).catch(() => null)
+          return !!res && /\bSAME\b/i.test(res.content) && !/\bDIFFERENT\b/i.test(res.content)
+        }
+        const second = await solve('solving the question again independently')
+        if (!second) {
+          meta.steps!.push('Double-check: the independent second solution did not finish in time')
+        } else if (await same(content, second)) {
+          meta.steps!.push('Double-check: an independent second solution reached the same result')
+        } else {
+          const third = await solve('the two solutions disagree — a third independent attempt')
+          const thirdMatchesFirst = third ? await same(content, third) : false
+          const thirdMatchesSecond = third && !thirdMatchesFirst ? await same(second, third) : false
+          if (thirdMatchesFirst) {
+            meta.steps!.push('Double-check: 2 of 3 independent solutions agree with this answer')
+          } else if (thirdMatchesSecond) {
+            const header = '\n\n---\n**Double-check: two independent re-solutions agree on a different result — corrected answer:**\n\n'
+            content += header + second
+            this.emit({ type: 'token', ...ev, text: header + second })
+            meta.steps!.push('Double-check: 2 of 3 independent solutions disagreed with the first answer; corrected')
+          } else {
+            const warn = '\n\n> ⚠️ Double-check: three independent attempts reached different results. Treat this answer with caution and verify it by hand.'
+            content += warn
+            this.emit({ type: 'token', ...ev, text: warn })
+            meta.steps!.push('Double-check: independent attempts disagree (no majority)')
+          }
+        }
+      }
       // ---- File actions → change set for review ----
       const { actions, errors } = parseActions(content)
       const writes = actions.filter((a) => a.type !== 'read_file' && a.type !== 'search_files')

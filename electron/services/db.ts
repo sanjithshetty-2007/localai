@@ -2,7 +2,10 @@ import Database from 'better-sqlite3'
 import path from 'node:path'
 import { app } from 'electron'
 import type { Settings } from '../../shared/types'
-import { PRESET_VERSION, PROFILE_PRESETS } from '../../shared/profiles'
+import os from 'node:os'
+import { PRESET_VERSION, PROFILE_PRESETS, adjustRolesForMemory } from '../../shared/profiles'
+
+const TOTAL_RAM_GB = os.totalmem() / 1073741824
 
 let db: Database.Database | null = null
 
@@ -112,14 +115,16 @@ export const DEFAULT_SETTINGS: Settings = {
   presetVersion: PRESET_VERSION,
   setupDone: false,
   autoUpdate: true,
-  reasoningBudget: 8192
+  reasoningBudget: 12288,
+  doubleCheck: true,
+  testCode: false
 }
 
 export function getSettings(): Settings {
   const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get('app') as
     | { value: string }
     | undefined
-  if (!row) return structuredClone(DEFAULT_SETTINGS)
+  if (!row) return { ...structuredClone(DEFAULT_SETTINGS), roles: adjustRolesForMemory({ ...DEFAULT_SETTINGS.roles }, TOTAL_RAM_GB) }
   try {
     const parsed = JSON.parse(row.value) as Partial<Settings>
     const merged: Settings = {
@@ -130,8 +135,10 @@ export function getSettings(): Settings {
     // One-time migration to the current model presets for the saved profile.
     if ((parsed.presetVersion ?? 1) < PRESET_VERSION) {
       const preset = PROFILE_PRESETS[merged.profile] ?? PROFILE_PRESETS.balanced
-      merged.roles = { ...preset.roles }
+      merged.roles = adjustRolesForMemory({ ...preset.roles }, TOTAL_RAM_GB)
       merged.numCtx = preset.numCtx
+      // 1.0.5: Standard reasoning depth is 12K (the 30B needed ~9.8K tokens to self-correct on infix→postfix).
+      if (!merged.reasoningBudget || merged.reasoningBudget === 8192) merged.reasoningBudget = 12288
       merged.presetVersion = PRESET_VERSION
       getDb().prepare('UPDATE settings SET value = ? WHERE key = ?').run(JSON.stringify(merged), 'app')
     }
@@ -146,7 +153,8 @@ export function saveSettings(patch: Partial<Settings>): Settings {
   const next: Settings = {
     ...current,
     ...patch,
-    roles: { ...current.roles, ...(patch.roles ?? {}) }
+    // Never select the 30B reasoning model on machines without the RAM for it.
+    roles: adjustRolesForMemory({ ...current.roles, ...(patch.roles ?? {}) }, TOTAL_RAM_GB)
   }
   getDb()
     .prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')

@@ -362,7 +362,8 @@ export function SettingsView() {
             description="How long the reasoning model (deepseek-r1) may think before answering. If it hasn't finished when the limit is reached, the coding or conversation model writes the final answer from its reasoning. Deeper thinking needs a larger context, so it is slower and uses more memory."
           >
             <Select value={settings.reasoningBudget} onChange={(e) => void updateSettings({ reasoningBudget: Number(e.target.value) })}>
-              <option value={8192}>Standard: 8K thinking tokens (≈2–4 min)</option>
+              <option value={8192}>Fast: 8K thinking tokens (≈2–3 min)</option>
+              <option value={12288}>Standard: 12K thinking tokens (≈3–5 min)</option>
               <option value={16384}>Extended: 16K thinking tokens (≈5–9 min)</option>
               <option value={24576}>Maximum: 24K thinking tokens (≈8–15 min)</option>
             </Select>
@@ -378,6 +379,18 @@ export function SettingsView() {
           </Field>
           <Toggle checked={settings.autoRouting} onChange={(v) => void updateSettings({ autoRouting: v })} label="Automatic model routing" description="Choose the general, coding, reasoning or vision model per request. When off, the general model answers everything (images still use the vision model)." />
           <Toggle checked={settings.singleModelResidency} onChange={(v) => void updateSettings({ singleModelResidency: v })} label="Keep only one model in memory" description="Unload other models before loading a new one. Recommended for 8 GB GPUs." />
+          <Toggle
+            checked={settings.doubleCheck}
+            onChange={(v) => void updateSettings({ doubleCheck: v })}
+            label="Double-check reasoning answers"
+            description="The reasoning model solves the question a second time independently and compares results; if they differ, a third attempt decides. More accurate, about twice as slow."
+          />
+          <Toggle
+            checked={settings.testCode}
+            onChange={(v) => void updateSettings({ testCode: v })}
+            label="Test code by running it"
+            description="After writing a C++ solution, the assistant writes tests (problem examples and edge cases), compiles and runs them in a temporary folder with a 10-second limit, and fixes the solution if a test crashes, hangs or fails. This runs AI-written code on your computer — enable only if you accept that."
+          />
           <Toggle checked={settings.knowledgeEnabled} onChange={(v) => void updateSettings({ knowledgeEnabled: v })} label="Use the knowledge library" description="Add relevant passages from your syllabus and notes (Knowledge view in the activity bar) to each request." />
           <Toggle checked={settings.autoApplyEdits} onChange={(v) => void updateSettings({ autoApplyEdits: v })} label="Apply AI file edits automatically" description="Write created and edited files without asking. Deletes, renames and commands always ask first. Applied changes can be undone from the chat." />
         </Section>

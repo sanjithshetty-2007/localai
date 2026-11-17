@@ -62,12 +62,13 @@ Complexity: inorder traversal O(n) time, O(1) extra space.
 Also called: height-balanced tree, self-balancing BST.
 Definition: a BST in which for every node the balance factor = height(left) − height(right) is −1, 0 or +1.
 Node: data, left, right, height.
-Insertion: insert as in a BST, update heights on the way back up, and at the first unbalanced node apply a rotation:
+Insertion: insert as in a BST, then walk back UP from the new node updating heights. The rotation is applied at the LOWEST unbalanced ancestor of the new node, i.e. the first node with |balance factor| = 2 met while walking up from the insertion point, never a higher ancestor such as the root. One rotation there restores balance for the whole tree. Re-draw the tree after every insertion and recompute balance factors before the next key; an earlier mistake changes every later step.
 - LL case (inserted into the left subtree of the left child): single right rotation.
 - RR case (right subtree of the right child): single left rotation.
 - LR case (right subtree of the left child): left rotation on the left child, then right rotation on the node.
 - RL case (left subtree of the right child): right rotation on the right child, then left rotation on the node.
 Right rotation of y: x = y->left; T2 = x->right; x->right = y; y->left = T2; update the heights of y then x; return x.
+Worked example (keys 30, 20, 10, 5, 3, 4), balance factor bf = height(left) - height(right): insert 10 -> 30 has bf +2 (new key in the left subtree of its left child) -> LL, right rotation at 30 -> 20(10, 30). Insert 5 -> 20(10(5, -), 30), all |bf| <= 1. Insert 3 -> walking up from 3: 5 has bf +1, 10 has bf +2 (20 also has bf +2, but 10 is lower) -> LL at 10 -> 20(5(3, 10), 30). Insert 4 (right child of 3) -> walking up: 3 has bf -1, 5 has bf +1, 20 has bf +2 and 4 lies in the left subtree of its left child 5 -> LL at 20 -> 5(3(-, 4), 20(10, 30)). Always state for each key: the lowest unbalanced node, the case (LL/RR/LR/RL), and the tree after the rotation.
 Deletion: BST delete, then rebalance with the same rotations up to the root.
 Complexity: O(log n) search, insert, delete.
 
