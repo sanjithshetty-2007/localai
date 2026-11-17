@@ -19,6 +19,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Add Intel macOS terminal binaries
         run: npm install --no-save --ignore-scripts --force "@lydell/node-pty-darwin-x64@$(node -p "require('./node_modules/@lydell/node-pty/package.json').version")"
+      - run: npm test
       - run: npx electron-vite build
       - run: npx electron-builder --mac --publish never
       - name: Verify macOS signatures and native modules

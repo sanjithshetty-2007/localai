@@ -89,6 +89,10 @@ Unit tests: 35/35 (new: heading and comment file-name formats, `#include` not mi
 
 Verification features: **Double-check reasoning answers** (on by default; independent re-solve, majority of 3 on disagreement) and **Test code by running it** (opt-in; a corrected solution is shown only if it passes the tests the original failed). The first two LeetCode re-run answers in run 4 exposed false alarms from buggy generated tests, and that was fixed before release.
 
+## 1.0.6: macOS code-test fix (2026-11-17)
+
+The 1.0.5 macOS build stopped at the unit tests: Apple's `g++` is clang with libc++, which has no `<bits/stdc++.h>`, so the LeetCode-style compile check and "Test code by running it" could not compile anything on a Mac. Fix: on macOS only, a substitute `bits/stdc++.h` (the standard headers it stands for) is placed in the private temp folder; Windows and Linux keep using GCC's own header. New unit test compiles LeetCode code against the substitute and checks that it is the header actually used. 55/55 unit tests.
+
 ## Re-running
 
 ```bash

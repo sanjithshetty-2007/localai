@@ -63,6 +63,21 @@ function run(cmd: string, args: string[], cwd: string): Promise<{ ok: boolean; o
 const LEETCODE_TREE = 'struct TreeNode { int val; TreeNode *left; TreeNode *right; TreeNode() : val(0), left(nullptr), right(nullptr) {} TreeNode(int x) : val(x), left(nullptr), right(nullptr) {} TreeNode(int x, TreeNode *l, TreeNode *r) : val(x), left(l), right(r) {} };\n'
 const LEETCODE_LIST = 'struct ListNode { int val; ListNode *next; ListNode() : val(0), next(nullptr) {} ListNode(int x) : val(x), next(nullptr) {} ListNode(int x, ListNode *n) : val(x), next(n) {} };\n'
 
+/**
+ * macOS: Apple's g++ is clang with libc++, which has no <bits/stdc++.h> (a GCC header that
+ * LeetCode-style code relies on). Provide an equivalent in the temp folder; other platforms
+ * use GCC's own header and are unaffected.
+ */
+const BITS_STDCXX = ['algorithm', 'array', 'bitset', 'cassert', 'cctype', 'climits', 'cmath', 'cstdint', 'cstdio', 'cstdlib', 'cstring', 'deque', 'functional', 'iomanip', 'iostream', 'iterator', 'limits', 'list', 'map', 'memory', 'numeric', 'queue', 'set', 'sstream', 'stack', 'string', 'tuple', 'unordered_map', 'unordered_set', 'utility', 'vector']
+  .map((h) => `#include <${h}>`)
+  .join('\n')
+export function addBitsShim(dir: string, platform: NodeJS.Platform = process.platform): string[] {
+  if (platform !== 'darwin') return []
+  fs.mkdirSync(path.join(dir, 'shim', 'bits'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'shim', 'bits', 'stdc++.h'), `${BITS_STDCXX}\n`)
+  return ['-I', path.join(dir, 'shim')]
+}
+
 /** C/C++ source with comments removed (strings are rare in these snippets). */
 export function stripCppComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, '')
@@ -130,7 +145,7 @@ export async function runCppTest(solution: string, testMain: string | null, time
     const src = path.join(dir, 'test.cpp')
     const exe = path.join(dir, process.platform === 'win32' ? 'test.exe' : 'test')
     fs.writeFileSync(src, body)
-    const c = await run('g++', ['-std=c++17', '-O1', '-o', exe, src], dir)
+    const c = await run('g++', ['-std=c++17', ...addBitsShim(dir), '-O1', '-o', exe, src], dir)
     if (c.missing) return { ran: false, ok: false, output: '', reason: 'g++ not installed' }
     if (!c.ok) return { ran: true, ok: false, output: c.out.slice(0, 3000), reason: 'test program did not compile' }
     const r = await new Promise<{ code: number | null; out: string; timedOut: boolean }>((resolve) => {
@@ -169,8 +184,9 @@ export async function compileCheck(files: CodeFile[], pythonCmd = process.platfo
       if (!r.ok) errs.push(r.out)
     }
     const cppFiles = byLang('cpp').filter((f) => !f.name.endsWith('.hpp') && !f.name.endsWith('.h'))
+    const shim = cppFiles.length ? addBitsShim(dir) : []
     for (const f of cppFiles) {
-      const r = await run('g++', ['-fsyntax-only', '-std=c++17', '-Wall', '-Werror=return-type', '-I.', f.name], dir)
+      const r = await run('g++', ['-fsyntax-only', '-std=c++17', '-Wall', '-Werror=return-type', '-I.', ...shim, f.name], dir)
       if (r.missing) break
       if (!report.checked.includes('C++')) report.checked.push('C++')
       if (!r.ok) errs.push(r.out)

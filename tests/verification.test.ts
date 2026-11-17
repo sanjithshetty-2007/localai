@@ -43,3 +43,27 @@ describe('crash descriptions', () => {
     expect(describeExit(7)).toBe('exited with code 7')
   })
 })
+
+describe('macOS <bits/stdc++.h> shim', () => {
+  it('compiles LeetCode-style code against the shim instead of the GCC header', async () => {
+    const os = await import('node:os')
+    const { spawnSync } = await import('node:child_process')
+    const { addBitsShim, withLeetCodePrelude } = await import('../electron/services/compile-check')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shim-test-'))
+    try {
+      const args = addBitsShim(dir, 'darwin')
+      expect(args[0]).toBe('-I')
+      expect(addBitsShim(dir, 'win32')).toEqual([])
+      const src = withLeetCodePrelude(`class Solution { public: int f(vector<int>& v){ unordered_map<int,int> m; priority_queue<int> pq; stack<int> st; deque<int> dq; set<int> s;
+        for (int x : v) { m[x]++; pq.push(x); st.push(x); dq.push_back(x); s.insert(x); } sort(v.begin(), v.end()); return accumulate(v.begin(), v.end(), 0) + (int)sqrt(16.0) + INT_MAX % 7 + (int)strlen("ab"); } };
+        int main(){ vector<int> v{3,1,2}; Solution s; printf("%d\\n", s.f(v)); assert(true); string t = to_string(1); cout << t << endl; }`)
+      fs.writeFileSync(path.join(dir, 't.cpp'), src)
+      // -H lists every header opened: the shim must be the <bits/stdc++.h> that gets used.
+      const r = spawnSync('g++', ['-std=c++17', '-fsyntax-only', ...args, '-H', 't.cpp'], { cwd: dir, encoding: 'utf8' })
+      expect(r.status, r.stderr).toBe(0)
+      expect(r.stderr).toMatch(/shim[\\/]bits[\\/]stdc\+\+\.h/)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60000)
+})
